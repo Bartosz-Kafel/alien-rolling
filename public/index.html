@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a1128">
+  <meta name="description" content="AFK Alien Dice, an incremental alien-collecting dice game.">
+  <title>AFK Alien Dice</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="starfield" aria-hidden="true"></div>
+
+  <div id="loginModal" class="modal is-open" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+    <form id="loginForm" class="login-card">
+      <p class="eyebrow">SECURE PLAYER LINK</p>
+      <h1 id="loginTitle">AFK <span>ALIEN DICE</span></h1>
+      <p class="login-copy">Collect strange lifeforms. Deploy them. Let the credits roll while you are away.</p>
+      <label for="username">Pilot name</label>
+      <input id="username" name="username" minlength="3" maxlength="24" autocomplete="username" required placeholder="Friend A">
+      <label for="password">Passcode</label>
+      <input id="password" name="password" type="password" minlength="4" maxlength="128" autocomplete="current-password" required placeholder="At least 4 characters">
+      <button class="primary-button" type="submit">Enter the station <span>→</span></button>
+      <p id="loginError" class="form-error" role="alert"></p>
+      <p class="fine-print">New pilot names create an account. Existing names require their passcode.</p>
+    </form>
+  </div>
+
+  <div id="placementModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="placementTitle" aria-hidden="true">
+    <div class="placement-card">
+      <button id="closePlacement" class="icon-button close-button" type="button" aria-label="Close alien selector">×</button>
+      <p class="eyebrow">EMPTY CONTAINER</p>
+      <h2 id="placementTitle">Choose an alien to deploy</h2>
+      <p class="muted">A deployed alien produces credits even while you are away.</p>
+      <div id="placementChoices" class="placement-choices"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <main id="app" class="app-shell" aria-hidden="true">
+    <header class="topbar">
+      <div class="brand-mark" aria-label="AFK Alien Dice">AD</div>
+      <div class="player-heading">
+        <span id="pilotName">Pilot</span>
+        <small>ORBITAL COLLECTION UNIT</small>
+      </div>
+      <div class="balance-block">
+        <span class="balance-label">CREDITS</span>
+        <strong id="moneyDisplay">$0.00</strong>
+        <small id="incomeDisplay">+$0.00 / sec</small>
+      </div>
+      <button id="logoutButton" class="icon-button logout-button" type="button" aria-label="Log out">↪</button>
+    </header>
+
+    <section id="inventoryView" class="view" aria-labelledby="inventoryHeading">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">HANGAR STORAGE</p>
+          <h2 id="inventoryHeading">Inventory</h2>
+        </div>
+        <span id="inventoryCount" class="stat-chip">0 aliens</span>
+      </div>
+      <p class="section-copy">Duplicate rolls stack automatically. Send an alien into the field whenever a container is open.</p>
+      <div id="inventoryGrid" class="alien-grid"></div>
+    </section>
+
+    <section id="aliensView" class="view" aria-labelledby="aliensHeading" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">PASSIVE GENERATORS</p>
+          <h2 id="aliensHeading">Alien containers</h2>
+        </div>
+        <span id="slotCount" class="stat-chip">1 slot</span>
+      </div>
+      <p class="section-copy">Every occupied container pays its displayed rate into your account on the server.</p>
+      <div id="slotGrid" class="slot-grid"></div>
+    </section>
+
+    <section id="shopView" class="view" aria-labelledby="shopHeading" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">STATION RESEARCH</p>
+          <h2 id="shopHeading">Upgrade shop</h2>
+        </div>
+        <span class="stat-chip">Base price $100</span>
+      </div>
+      <p class="section-copy">Each next price is exactly 100 × 1.5<sup>level</sup>. Each purchased bonus is base bonus × 1.1<sup>level</sup>.</p>
+      <div id="shopGrid" class="shop-grid"></div>
+    </section>
+
+    <section id="rollingView" class="view rolling-view" aria-labelledby="rollingHeading" hidden>
+      <div class="section-heading centered-heading">
+        <div>
+          <p class="eyebrow">QUANTUM ROLL CORE</p>
+          <h2 id="rollingHeading">Roll for an alien</h2>
+        </div>
+      </div>
+      <p id="rollHint" class="section-copy centered-copy">Tap the dice to materialize a new alien. Rolls are free.</p>
+      <button id="rollButton" class="dice-button" type="button" aria-label="Roll the dice">
+        <span class="dice-shadow" aria-hidden="true"></span>
+        <span id="dice" class="dice" aria-hidden="true">
+          <span class="dice-face face-front"><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="dice-face face-back"><i></i><i></i><i></i><i></i></span>
+          <span class="dice-face face-right"><i></i><i></i><i></i></span>
+          <span class="dice-face face-left"><i></i><i></i><i></i></span>
+          <span class="dice-face face-top"><i></i><i></i></span>
+          <span class="dice-face face-bottom"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        </span>
+      </button>
+      <p class="dice-caption">CLICK TO ROLL <span>◆</span> <span id="cooldownDisplay">READY</span></p>
+      <div id="alienReel" class="alien-reel" aria-live="polite" aria-label="Possible alien roll sequence"></div>
+      <div id="rollResult" class="roll-result" aria-live="polite"></div>
+    </section>
+
+    <section id="leaderboardView" class="view" aria-labelledby="leaderboardHeading" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">STATION-WIDE SIGNAL</p>
+          <h2 id="leaderboardHeading">Leaderboard</h2>
+        </div>
+        <span id="rankBadge" class="stat-chip">Rank —</span>
+      </div>
+      <p class="section-copy">The ten wealthiest pilots are shown. Your true rank always follows if it is outside the top ten.</p>
+      <div class="leaderboard-table" role="table" aria-label="Top pilots">
+        <div class="table-head" role="row"><span>RANK</span><span>PILOT</span><span>CREDITS</span><span>ROLLS</span></div>
+        <div id="leaderboardRows"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Game navigation">
+    <button class="nav-tab" type="button" data-view="inventory" aria-label="Inventory"><span><b>▣</b>Inventory</span></button>
+    <button class="nav-tab" type="button" data-view="aliens" aria-label="Aliens"><span><b>☄</b>Aliens</span></button>
+    <button class="nav-tab" type="button" data-view="shop" aria-label="Shop"><span><b>✦</b>Shop</span></button>
+    <button class="nav-tab is-active" type="button" data-view="rolling" aria-label="Rolling"><span><b>⚄</b>Rolling</span></button>
+    <button class="nav-tab" type="button" data-view="leaderboard" aria-label="Leaderboard"><span><b>♜</b>Ranks</span></button>
+  </nav>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
