@@ -89,6 +89,64 @@
       <div id="shopGrid" class="shop-grid"></div>
     </section>
 
+      <section id="tradingView" class="view" aria-labelledby="tradingHeading" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">PILOT EXCHANGE</p>
+          <h2 id="tradingHeading">Trading</h2>
+        </div>
+        <span class="stat-chip">ALIEN TRANSFER</span>
+      </div>
+
+      <p class="section-copy">Send one alien from your inventory to another pilot.</p>
+
+      <div class="trade-panel">
+        <label for="tradeRecipient">Recipient pilot</label>
+        <input
+          id="tradeRecipient"
+          type="text"
+          maxlength="24"
+          autocomplete="off"
+          placeholder="Pilot name"
+        >
+
+        <div class="trade-selection" id="tradeAlienSelection">
+          <div class="empty-state">
+            <strong>No alien selected.</strong>
+            <p>Choose an alien from your inventory below.</p>
+          </div>
+        </div>
+
+        <div class="trade-quantity-row">
+          <label for="tradeQuantity">Amount to send</label>
+
+          <div class="trade-quantity-input">
+            <input
+              id="tradeQuantity"
+              type="number"
+              min="1"
+              value="1"
+              disabled
+            >
+            <span id="tradeQuantityMax">/ 0</span>
+          </div>
+        </div>
+
+        <button id="tradeSendButton" class="primary-button" type="button" disabled>
+          Send alien <span>→</span>
+        </button>
+      </div>
+
+      <div class="section-heading trade-inventory-heading">
+        <div>
+          <p class="eyebrow">AVAILABLE LIFEFORMS</p>
+          <h3>Choose an alien</h3>
+        </div>
+      </div>
+
+      <div id="tradeInventoryGrid" class="trade-inventory-grid"></div>
+    </section>
+
     <section id="rollingView" class="view rolling-view" aria-labelledby="rollingHeading" hidden>
       <div class="section-heading centered-heading">
         <div>
@@ -133,6 +191,7 @@
     <button class="nav-tab" type="button" data-view="inventory" aria-label="Inventory"><span><b>▣</b>Inventory</span></button>
     <button class="nav-tab" type="button" data-view="aliens" aria-label="Aliens"><span><b>☄</b>Aliens</span></button>
     <button class="nav-tab" type="button" data-view="shop" aria-label="Shop"><span><b>✦</b>Shop</span></button>
+    <button class="nav-tab" type="button" data-view="trading" aria-label="Trading"><span><b>⇄</b>Trade</span></button>
     <button class="nav-tab is-active" type="button" data-view="rolling" aria-label="Rolling"><span><b>⚄</b>Rolling</span></button>
     <button class="nav-tab" type="button" data-view="leaderboard" aria-label="Leaderboard"><span><b>♜</b>Ranks</span></button>
   </nav>

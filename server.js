@@ -13,30 +13,106 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_MONEY = 1_000_000_000_000_000;
 const BASE_ROLL_ANIMATION_MS = 2200;
 
-const PREFIXES = ["Space", "Nebula", "Chrono", "Stellar", "Void", "Quantum", "Lunar", "Solar", "Plasma", "Astral", "Eclipse"];
-const SPECIES = ["Slime", "Titan", "Voyager", "Mantis", "Oracle", "Warden", "Drifter", "Leviathan", "Sprite", "Monarch"];
-const ALIEN_NAMES = PREFIXES.flatMap((prefix) => SPECIES.map((species) => `${prefix} ${species}`)).slice(0, 101);
-const ALIEN_ICONS = ["👾", "🛸", "👽", "🪼", "🦑", "🦠", "🐙", "🪐", "🌌", "☄️", "🔮", "🛰️", "🌠", "🧬", "⚛️", "🦕"];
-const TIER_BY_INDEX = [
-  ["Common", 8], ["Uncommon", 23], ["Rare", 43], ["Epic", 61],
-  ["Legendary", 76], ["Mythic", 89], ["Divine", 96], ["Ancient", 100]
+// Expanded by 10x (111 prefixes)
+const PREFIXES = [
+  "Space", "Nebula", "Chrono", "Stellar", "Void", "Quantum", "Lunar", "Solar", "Plasma", "Astral", "Eclipse",
+  "Cosmic", "Galactic", "Orion", "Andromeda", "Nova", "Supernova", "Hyper", "Cyber", "Bio", "Geo", "Pyro",
+  "Cryo", "Hydro", "Aero", "Electro", "Pedro", "Abyssal", "Aether", "Nether", "Spectral", "Phantom", "Shadow",
+  "Light", "Dark", "Deep", "High", "Low", "Prime", "Apex", "Omega", "Alpha", "Beta", "Gamma",
+  "Delta", "Epsilon", "Zeta", "Sigma", "Matrix", "Vector", "Helix", "Nexus", "Vortex", "Singularity", "Horizon",
+  "Infinity", "Eternal", "Ancient", "Primal", "Prismatic", "Spectral", "Radiant", "Luminous", "Glimmer", "Twilight", "Obsidian",
+  "Meteor", "Comet", "Asteroid", "Titanium", "Carbon", "Child", "Iron", "Gold", "Quantum", "Nano", "Mega",
+  "Giga", "Tera", "Peta", "Exo", "Endo", "Meso", "Proto", "LGBQT+", "Neo", "Retro", "Future",
+  "Zenith", "Gay", "Pinnacle", "Abyss", "Lesbian", "Rift", "Anomaly", "Paradox", "Enigma", "Mirage", "Echo",
+  "Pulse", "Wave", "Ray", "Beam", "Flash", "Spark", "Blaze", "Frost", "Gale", "Quake", "Flux"
 ];
-const rawWeights = ALIEN_NAMES.map((_, index) => Math.exp(-index * 0.15));
-const totalWeight = rawWeights.reduce((sum, weight) => sum + weight, 0);
+
+// Expanded by 10x (100 species)
+const SPECIES = [
+  "Slime", "Titan", "Voyager", "Mantis", "Oracle", "Warden", "Drifter", "Leviathan", "Sprite", "Monarch",
+  "Beast", "Stalker", "Hunter", "Predator", "Scout", "Warrior", "Knight", "Mage", "Sorcerer", "Priest",
+  "Shaman", "Druid", "Rogue", "Assassin", "Thief", "Goliath", "Colossus", "Behemoth", "Giant", "Dwarf",
+  "Elf", "Orc", "Goblin", "Troll", "Lurdes", "Dragon", "Wyvern", "Drake", "Hydra", "Phoenix",
+  "Gryphon", "Pegasus", "Femboy", "Sphinx", "Minotaur", "Centaur", "Cyclops", "Gooner", "Medusa", "Siren",
+  "Mermaid", "Merman", "Kraken", "Cthulhu", "Demon", "Devil", "Angel", "Archangel", "Seraph", "Cherub",
+  "Ghost", "Spirit", "Phantom", "Specter", "Wraith", "Apparition", "Shade", "Shadow", "Ghouls", "Zombie",
+  "Vampire", "Werewolf", "Construct", "Golem", "Robot", "Android", "Cyborg", "Mech", "Machine", "Drone",
+  "Automaton", "Engine", "Core", "Matrix", "Network", "Swarm", "Hive", "Sanchez", "Colony", "Nigger",
+  "Herd", "Pack", "Pride", "School", "Pod", "Clan", "Tribe", "Guild", "Order", "Faction"
+];
+
+// Generates 11,100 unique combinations and takes the first 1,010 (10x your original 101 limit)
+const ALIEN_NAMES = PREFIXES.flatMap((prefix) => SPECIES.map((species) => `${prefix} ${species}`)).slice(0, 1010);
+
+// Expanded by over 10x (165 sci-fi, space, alien, and abstract icons)
+const ALIEN_ICONS = [
+  "👾", "🛸", "👽", "🪼", "🦑", "🦠", "🐙", "🤖", "🤖", "🦿", "🦾", "🧌",
+  "🪐", "🌌", "☄️", "🛰️", "🌠", "🚀", "🔭", "📡", "☀️", "🌙", "⭐", "🌟", 
+  "✨", "🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘", "🌙", "🌚", "🌛", 
+  "🌜", "🌞", "🌍", "🌎", "🌏", "🌀", "🌋", "☄️", "🌌", "🪐", "🌟", "⭐",
+  "🔮", "🧬", "⚛️", "⚡", "💥", "🔥", "💎", "🧿", "🌟", "☄️", "📿", "👑",
+  "💫", "🔋", "🔌", "🕯️", "💡", "🏮", "💎", "🔮", "🧿", "🌀", "☣️", "☢️",
+  "💠", "🌀", "💮", "💮", "🎴", "🔱", "⚜️", "👁️", "🧠", "💀", "☠️", "👻",
+  "🍄", "🌵", "🌴", "🌱", "🌿", "☘️", "🍀", "🍁", "🍂", "🍃", "🥀", "🌻", 
+  "🌼", "🌽", "🌾", "🌿", "🍄", "🌰", "🌲", "🌳", "🌴", "🌵", "🌶️", "🪨",
+  "🦕", "🦖", "🐊", "🐍", "🐢", "🦎", "🦂", "🕷️", "🪳", "🪰", "🪲", "🦗", 
+  "🐜", "🐝", "🪱", "🦋", "🐌", "🐛", "🐜", "🐝", "🐞", "🦗", "🕷️", "🦂",
+  "🌪️", "🌈", "💧", "🌊", "❄️", "💨", "🌫️", "🌬️", "☄️", "🔥", "💧", "⚡",
+  "❄️", "☃️", "⛄", "🌬️", "💨", "🌪️", "🌫️", "🌈", "☔", "⚡", "🌀", "🌊",
+  "🛑", "⚙️", "🛠️", "🧪", "🧫", "🔬", "🛡️", "⚔️", "🏹", "🗡️", "🪃", "⛓️",
+  "💣", "🗝️", "🔑", "🔒", "🔓", "🔏", "🔐", "⚖️", "🧭", "⏳", "⌛", "🔋",
+  "⚙️", "🔧", "🔨", "⚒️", "🛠️", "⛏️", "🔩", "⚙️", "🗜️", "⚖️", "⛓️", "🛡️"
+];
+
+
+// Expanded by 10x (80 progression tiers scaled proportionally up to index 1010)
+const TIER_BY_INDEX = [
+  ["Garbage", 10], ["Space Junk", 20], ["Bio-Waste", 30], ["Scrap Metal", 40], ["Bottom Feeder", 50], ["Fodder", 60], ["Stray", 70], ["Drifter", 80], ["Rookie", 90], ["Survivor", 100],
+  ["Scavenger", 115], ["Marauder", 130], ["Vanguard", 145], ["Enforcer", 160], ["Bio-Hazard", 175], ["Toxic Mutated", 190], ["Cyber-Augmented", 205], ["Apex Stalker", 220], ["Infiltrator", 235], ["Overlord", 250],
+  ["Anomaly", 270], ["Glitch", 290], ["Void Walker", 310], ["Abyssal", 330], ["Phantom", 350], ["Specter", 370], ["Chronos-Warped", 390], ["Quantum Shifted", 410], ["Singularity", 430], ["Eon Walker", 450],
+  ["World Eater", 470], ["Planet Buster", 490], ["Star Crusher", 510], ["Solar Flare", 530], ["Supernova", 550], ["Event Horizon", 570], ["Cosmic Storm", 590], ["Nebula Spawn", 610], ["Stellar Sovereign", 630], ["Galaxy Tyrant", 650],
+  ["Astral Titan", 665], ["Celestial", 680], ["Immortal", 695], ["Eldritch Horror", 710], ["Void Sovereign", 725], ["Nether King", 740], ["Aether Lord", 755], ["Primordial", 770], ["Ancient Terror", 785], ["Doomsday", 800],
+  ["Demi-God", 812], ["Godlike", 824], ["Deity", 836], ["Pantheon Elite", 848], ["Reality Warper", 860], ["Time Weaver", 872], ["Space Bender", 884], ["Dimensional Lord", 896], ["Astral Emperor", 908], ["Infinite", 920],
+  ["Omnipotent", 927], ["Omnipresent", 934], ["Absolute Zero", 941], ["Eternal Flame", 948], ["Cosmic Blueprint", 955], ["Matrix Core", 962], ["Singularity Alpha", 969], ["Void Omega", 976], ["Grand Architect", 983], ["Universal Constant", 990],
+  ["Beyond Existence", 992], ["Timeless", 994], ["Outer God", 996], ["Multiversal", 998], ["Omniversal", 1000], ["The Zenith", 1002], ["Apex Predestined", 1004], ["Final Paradox", 1006], ["The Absolute", 1008], ["True Entity", 1010]
+];
+
+
 const roundFinancial = (value) => Math.round(value * 10_000) / 10_000;
-const getTier = (index) => TIER_BY_INDEX.find(([, maxIndex]) => index <= maxIndex)[0];
+
+const getTier = (index) =>
+  TIER_BY_INDEX.find(([, maxIndex]) => index <= maxIndex)[0];
+
+function rarityDenominator(index) {
+  const progress = index / (ALIEN_NAMES.length - 1);
+
+  return Math.max(
+    2,
+    Math.round(
+      2 * Math.pow(50_000_000_000_000 / 2, progress ** 1.35)
+    )
+  );
+}
+
 const ALIENS = ALIEN_NAMES.map((name, index) => {
-  const chance = rawWeights[index] / totalWeight;
+  const denominator = rarityDenominator(index);
+  const rarity = 1 / denominator;
+
+  const moneyPerSec =
+    0.15 * Math.pow(denominator, 0.65);
+
   return Object.freeze({
     id: `alien_${String(index + 1).padStart(3, "0")}`,
     name,
     tier: getTier(index),
     icon: ALIEN_ICONS[index % ALIEN_ICONS.length],
     color: `hsl(${(index * 37 + 165) % 360} 85% 63%)`,
-    rarity: chance,
-    money_per_sec: roundFinancial(0.05 / chance)
+    rarity,
+    rarityDenominator: denominator,
+    money_per_sec: roundFinancial(moneyPerSec)
   });
 });
+
 const ALIEN_BY_ID = new Map(ALIENS.map((alien) => [alien.id, alien]));
 
 const UPGRADE_CONFIG = Object.freeze({
@@ -172,6 +248,7 @@ function upgradeCost(level) {
 }
 
 function nextUpgradeBonus(key, level) {
+  if (key === "rolling_speed") return 1 - (0.96 ** (level + 1));
   return UPGRADE_CONFIG[key].baseBonus * (1.1 ** level);
 }
 
@@ -194,8 +271,9 @@ function totalMoneyPerSecond(player) {
 }
 
 function rollAnimationDuration(player) {
-  const speedBonus = totalUpgradeBonus("rolling_speed", player.shop_purchases.rolling_speed);
-  return Math.max(500, Math.round(BASE_ROLL_ANIMATION_MS * (1 - Math.min(0.77, speedBonus))));
+  const level = player.shop_purchases.rolling_speed;
+  const speedMultiplier = 0.96 ** level;
+  return Math.max(100, Math.round(BASE_ROLL_ANIMATION_MS * speedMultiplier));
 }
 
 /* Placement records carry their collection timestamp, preserving the required player shape. */
@@ -213,7 +291,25 @@ function applyPassiveIncome(player, now = Date.now()) {
 }
 
 function publicCatalog() {
-  return ALIENS.map(({ id, name, tier, icon, color, rarity, money_per_sec }) => ({ id, name, tier, icon, color, rarity, money_per_sec }));
+  return ALIENS.map(({
+    id,
+    name,
+    tier,
+    icon,
+    color,
+    rarity,
+    rarityDenominator,
+    money_per_sec
+  }) => ({
+    id,
+    name,
+    tier,
+    icon,
+    color,
+    rarity,
+    rarityDenominator,
+    money_per_sec
+  }));
 }
 
 function leaderboardFor(activeUserId) {
@@ -267,15 +363,45 @@ function gameStateFor(userId) {
 }
 
 function pickAlien(player) {
-  const luck = totalUpgradeBonus("luck_boost", player.shop_purchases.luck_boost);
-  const weights = ALIENS.map((_, index) => rawWeights[index] * (1 + luck * 2 * ((index / (ALIENS.length - 1)) ** 1.6)));
-  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
-  let roll = crypto.randomInt(0, 1_000_000_000) / 1_000_000_000 * weightTotal;
+  const luck = totalUpgradeBonus(
+    "luck_boost",
+    player.shop_purchases.luck_boost
+  );
+
+  const weights = ALIENS.map((alien, index) => {
+    const progress = index / (ALIENS.length - 1);
+
+    const luckMultiplier =
+      1 + luck * 2 * (progress ** 1.6);
+
+    return alien.rarity * luckMultiplier;
+  });
+
+  const weightTotal = weights.reduce(
+    (sum, weight) => sum + weight,
+    0
+  );
+
+  let roll =
+    crypto.randomInt(0, 1_000_000_000) /
+    1_000_000_000 *
+    weightTotal;
+
   for (let index = 0; index < ALIENS.length; index += 1) {
     roll -= weights[index];
-    if (roll <= 0 || index === ALIENS.length - 1) return { alien: ALIENS[index], chance: weights[index] / weightTotal };
+
+    if (roll <= 0 || index === ALIENS.length - 1) {
+      return {
+        alien: ALIENS[index],
+        chance: weights[index] / weightTotal
+      };
+    }
   }
-  return { alien: ALIENS[0], chance: weights[0] / weightTotal };
+
+  return {
+    alien: ALIENS[0],
+    chance: weights[0] / weightTotal
+  };
 }
 
 function validatePlayer(player) {
@@ -353,7 +479,11 @@ app.post("/api/roll", requireSession, requireSameOrigin, async (request, respons
       const result = pickAlien(player);
       player.inventory[result.alien.id] = (Number(player.inventory[result.alien.id]) || 0) + 1;
       player.total_rolls += 1;
-      return { ok: true, rolled: { ...result.alien, rarity: result.chance }, state: gameStateFor(request.userId) };
+      return {
+        ok: true,
+        rolled: result.alien,
+        state: gameStateFor(request.userId)
+      };
     });
     if (!result.ok) return response.status(result.status).json(result);
     return response.json(result);
@@ -454,6 +584,97 @@ app.post("/api/place-alien", requireSession, requireSameOrigin, async (request, 
       return { ok: true, state: gameStateFor(request.userId) };
     });
     if (!result.ok) return response.status(result.status).json(result);
+    return response.json(result);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/api/trade", requireSession, requireSameOrigin, async (request, response, next) => {
+  try {
+    const recipient = typeof request.body?.recipient === "string"
+      ? request.body.recipient.trim()
+      : "";
+
+    const alienId = request.body?.alienId;
+    const quantity = Number(request.body?.quantity);
+
+    if (!recipient || recipient.length > 24) {
+      return response.status(400).json({ error: "Invalid recipient username." });
+    }
+
+    if (typeof alienId !== "string" || !ALIEN_BY_ID.has(alienId)) {
+      return response.status(400).json({ error: "Invalid alien selection." });
+    }
+
+    if (!Number.isSafeInteger(quantity) || quantity < 1) {
+      return response.status(400).json({ error: "Invalid trade quantity." });
+    }
+
+    const result = await withDatabaseLock(() => {
+      const sender = database.users[request.userId];
+
+      if (!validatePlayer(sender)) {
+        throw new Error("Stored player data has an invalid shape.");
+      }
+
+      applyPassiveIncome(sender);
+
+      const recipientEntry = Object.entries(database.users).find(
+        ([, player]) => player.name.toLowerCase() === recipient.toLowerCase()
+      );
+
+      if (!recipientEntry) {
+        return {
+          ok: false,
+          status: 404,
+          error: "That pilot does not exist."
+        };
+      }
+
+      const [recipientId, receiver] = recipientEntry;
+
+      if (recipientId === request.userId) {
+        return {
+          ok: false,
+          status: 400,
+          error: "You cannot trade with yourself."
+        };
+      }
+
+      const ownedQuantity = Number(sender.inventory[alienId]) || 0;
+
+      if (ownedQuantity < quantity) {
+        return {
+          ok: false,
+          status: 400,
+          error: `You only have ${ownedQuantity} of that alien.`
+        };
+      }
+
+      if (!validatePlayer(receiver)) {
+        throw new Error("Stored recipient data has an invalid shape.");
+      }
+
+      sender.inventory[alienId] -= quantity;
+
+      if (sender.inventory[alienId] === 0) {
+        delete sender.inventory[alienId];
+      }
+
+      receiver.inventory[alienId] =
+        (Number(receiver.inventory[alienId]) || 0) + quantity;
+
+      return {
+        ok: true,
+        state: gameStateFor(request.userId)
+      };
+    });
+
+    if (!result.ok) {
+      return response.status(result.status).json(result);
+    }
+
     return response.json(result);
   } catch (error) {
     return next(error);

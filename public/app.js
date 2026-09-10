@@ -18,6 +18,12 @@ const elements = {
   slotCount: $("#slotCount"),
   slotGrid: $("#slotGrid"),
   shopGrid: $("#shopGrid"),
+  tradeRecipient: $("#tradeRecipient"),
+  tradeAlienSelection: $("#tradeAlienSelection"),
+  tradeSendButton: $("#tradeSendButton"),
+  tradeInventoryGrid: $("#tradeInventoryGrid"),
+  tradeQuantity: $("#tradeQuantity"),
+  tradeQuantityMax: $("#tradeQuantityMax"),
   rankBadge: $("#rankBadge"),
   leaderboardRows: $("#leaderboardRows"),
   dice: $("#dice"),
@@ -37,6 +43,8 @@ const appState = {
   lastClientTick: performance.now(),
   rolling: false,
   placementSlot: null,
+  tradeAlienId: null,
+  tradeQuantity: 1,
   syncInFlight: false,
   toastTimer: null
 };
@@ -60,6 +68,32 @@ function formatRate(value) {
   if (safe >= 1_000_000) return `$${(safe / 1_000_000).toFixed(2)}M`;
   if (safe >= 1_000) return `$${(safe / 1_000).toFixed(2)}K`;
   return `$${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatRarity(denominator) {
+  const value = Number(denominator);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return "1 / ?";
+  }
+
+  if (value >= 1_000_000_000_000) {
+    return `1 / ${(value / 1_000_000_000_000).toFixed(1)}T`;
+  }
+
+  if (value >= 1_000_000_000) {
+    return `1 / ${(value / 1_000_000_000).toFixed(1)}B`;
+  }
+
+  if (value >= 1_000_000) {
+    return `1 / ${(value / 1_000_000).toFixed(1)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `1 / ${(value / 1_000).toFixed(1)}K`;
+  }
+
+  return `1 / ${Math.round(value).toLocaleString()}`;
 }
 
 function formatPercent(fraction) {
@@ -131,6 +165,8 @@ function priceClass(cost) {
   return appState.estimatedMoney + 0.00001 >= cost ? "affordable" : "unaffordable";
 }
 
+
+
 function alienCard(alien, count = null, action = "") {
   return `
     <article class="alien-card" style="--alien-color:${escapeHtml(alien.color)}">
@@ -140,7 +176,7 @@ function alienCard(alien, count = null, action = "") {
         <div><h3 class="alien-name">${escapeHtml(alien.name)}</h3><span class="tier-label">${escapeHtml(alien.tier)}</span></div>
       </div>
       <p class="alien-rate">${formatRate(alien.money_per_sec)} <small>/ sec</small></p>
-      <p class="rarity-line">Rarity: <b>${formatPercent(alien.rarity)}</b></p>
+      <p class="rarity-line">Rarity: <b>${formatRarity(alien.rarityDenominator)}</b></p>
       ${action}
     </article>`;
 }
@@ -200,6 +236,113 @@ function renderShop() {
   }).join("");
 }
 
+function renderTrading() {
+  const entries = inventoryEntries();
+
+  if (!entries.length) {
+    elements.tradeInventoryGrid.innerHTML = `
+      <div class="empty-state">
+        <strong>Your hangar is empty.</strong>
+        <p>Roll an alien before trying to trade.</p>
+      </div>`;
+
+    elements.tradeAlienSelection.innerHTML = `
+      <div class="empty-state">
+        <strong>No alien selected.</strong>
+        <p>Your inventory is empty.</p>
+      </div>`;
+
+    elements.tradeSendButton.disabled = true;
+
+    if (elements.tradeQuantity) {
+      elements.tradeQuantity.disabled = true;
+      elements.tradeQuantity.value = 1;
+    }
+
+    if (elements.tradeQuantityMax) {
+      elements.tradeQuantityMax.textContent = "/ 0";
+    }
+
+    return;
+  }
+
+  elements.tradeInventoryGrid.innerHTML = entries.map(({ alien, count }) => `
+    <button
+      class="trade-alien-card ${appState.tradeAlienId === alien.id ? "is-selected" : ""}"
+      type="button"
+      data-trade-alien="${escapeHtml(alien.id)}"
+      style="--alien-color:${escapeHtml(alien.color)}"
+    >
+      <div class="alien-portrait" aria-hidden="true">${escapeHtml(alien.icon)}</div>
+      <div>
+        <strong>${escapeHtml(alien.name)}</strong>
+        <span>${escapeHtml(alien.tier)}</span>
+        <small>×${count} · ${formatRate(alien.money_per_sec)} / sec</small>
+      </div>
+    </button>
+  `).join("");
+
+  const selected = entries.find(({ alien }) => alien.id === appState.tradeAlienId);
+
+  if (!selected) {
+    elements.tradeAlienSelection.innerHTML = `
+      <div class="empty-state">
+        <strong>No alien selected.</strong>
+        <p>Choose an alien from your inventory below.</p>
+      </div>`;
+
+    elements.tradeSendButton.disabled = true;
+
+    if (elements.tradeQuantity) {
+      elements.tradeQuantity.disabled = true;
+      elements.tradeQuantity.value = 1;
+    }
+
+    if (elements.tradeQuantityMax) {
+      elements.tradeQuantityMax.textContent = "/ 0";
+    }
+
+    return;
+  }
+
+  const { alien, count } = selected;
+
+  const quantityToSend = Math.min(
+    Math.max(1, Number(appState.tradeQuantity) || 1),
+    count
+  );
+
+  appState.tradeQuantity = quantityToSend;
+
+  elements.tradeAlienSelection.innerHTML = alienCard(
+    alien,
+      quantityToSend,
+    `<div class="selected-trade-label">READY TO SEND</div>`
+  );
+
+  const safeQuantity = Math.min(
+    Math.max(1, Number(appState.tradeQuantity) || 1),
+    count
+  );
+
+  appState.tradeQuantity = safeQuantity;
+
+  if (elements.tradeQuantity) {
+    elements.tradeQuantity.disabled = false;
+    elements.tradeQuantity.min = "1";
+    elements.tradeQuantity.max = String(count);
+    elements.tradeQuantity.value = String(safeQuantity);
+  }
+
+  if (elements.tradeQuantityMax) {
+    elements.tradeQuantityMax.textContent = `/ ${count}`;
+  }
+
+  const recipient = elements.tradeRecipient.value.trim();
+
+  elements.tradeSendButton.disabled = !recipient;
+}
+
 function renderLeaderboard() {
   const leaderboard = appState.game?.leaderboard;
   if (!leaderboard) return;
@@ -249,6 +392,7 @@ function renderAll() {
   renderInventory();
   renderSlots();
   renderShop();
+  renderTrading();
   renderLeaderboard();
   updateRollStatus();
   updateDynamicAffordability();
@@ -315,11 +459,24 @@ function shuffledRollCandidates(finalAlien, duration) {
 
 function renderReelFrame(alien, finalFrame) {
   elements.alienReel.innerHTML = `
-    <div class="reel-frame ${finalFrame ? "is-final" : ""}" style="--alien-color:${escapeHtml(alien.color)}">
-      <span class="alien-portrait" aria-hidden="true">${escapeHtml(alien.icon)}</span>
-      <span><b>${escapeHtml(alien.name)}</b><small>${escapeHtml(alien.tier)} · ${formatPercent(alien.rarity)}</small></span>
+    <div
+      class="reel-frame ${finalFrame ? "is-final" : ""}"
+      style="--alien-color:${escapeHtml(alien.color)}"
+    >
+      <span class="reel-scan-line" aria-hidden="true"></span>
+
+      <span class="alien-portrait" aria-hidden="true">
+        ${escapeHtml(alien.icon)}
+      </span>
+
+      <span class="reel-frame-info">
+        <b>${escapeHtml(alien.name)}</b>
+        <small>${escapeHtml(alien.tier)} · ${formatRarity(alien.rarityDenominator)}</small>
+      </span>
+
       <em>${finalFrame ? "LOCKED" : "SCANNING"}</em>
-    </div>`;
+    </div>
+  `;
 }
 
 function wait(milliseconds) {
@@ -328,45 +485,178 @@ function wait(milliseconds) {
 
 async function animateAlienReel(finalAlien, duration) {
   const candidates = shuffledRollCandidates(finalAlien, duration);
-  const finalHold = Math.min(360, Math.max(130, duration * 0.22));
-  const scanDelay = Math.max(35, (duration - finalHold) / Math.max(1, candidates.length - 1));
+
   elements.alienReel.classList.add("is-active");
+
+  // Show aliens quickly at first, then slow down near the result.
+  const delays = [
+    55, 65, 75, 90, 110, 135, 165, 205, 260, 340
+  ];
+
   for (let index = 0; index < candidates.length; index += 1) {
     const isFinal = index === candidates.length - 1;
-    renderReelFrame(candidates[index], isFinal);
-    await wait(isFinal ? finalHold : scanDelay);
+    const alien = candidates[index];
+
+    renderReelFrame(alien, isFinal);
+
+    if (isFinal) {
+      // Let the final alien stay visible dramatically.
+      await wait(650);
+    } else {
+      const progress = index / Math.max(1, candidates.length - 1);
+      const delayIndex = Math.min(
+        delays.length - 1,
+        Math.floor(progress * delays.length)
+      );
+
+      await wait(delays[delayIndex]);
+    }
   }
+
   elements.alienReel.classList.remove("is-active");
+  elements.alienReel.classList.add("reveal-complete");
+
+  await wait(420);
+
+  elements.alienReel.classList.remove("reveal-complete");
   elements.alienReel.innerHTML = "";
 }
 
+function showDiscovery(alien) {
+      const existing = document.querySelector(".discovery-banner");
+      if (existing) existing.remove();
+
+      const banner = document.createElement("div");
+
+      banner.className = "discovery-banner";
+      banner.style.setProperty("--alien-color", alien.color);
+
+      banner.innerHTML = `
+        <div class="discovery-backdrop"></div>
+
+        <div class="discovery-content">
+          <span class="discovery-label">NEW ALIEN</span>
+
+          <div class="discovery-icon">
+            ${escapeHtml(alien.icon)}
+          </div>
+
+          <div class="discovery-title">DISCOVERED</div>
+
+          <div class="discovery-name">
+            ${escapeHtml(alien.name)}
+          </div>
+
+          <div class="discovery-details">
+            ${escapeHtml(alien.tier)}
+            <span>•</span>
+            ${formatRate(alien.money_per_sec)} / sec
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(banner);
+
+      requestAnimationFrame(() => {
+        banner.classList.add("is-visible");
+      });
+
+      setTimeout(() => {
+        banner.classList.remove("is-visible");
+
+        setTimeout(() => {
+          banner.remove();
+        }, 450);
+      }, 2800);
+    }
+
 async function rollDice() {
   if (appState.rolling || !currentPlayer()) return;
-  const duration = Math.max(500, Number(currentPlayer().rollAnimationMs) || 2200);
+
+  const duration = Math.max(
+    100,
+    Number(currentPlayer().rollAnimationMs) || 2200
+  );
+
   appState.rolling = true;
+
   elements.dice.style.setProperty("--roll-duration", `${duration}ms`);
   elements.dice.classList.add("is-rolling");
-  elements.rollResult.innerHTML = "";
+
   updateRollStatus();
+
   try {
-    const response = await api("/api/roll", { method: "POST", body: "{}" });
+    const response = await api("/api/roll", {
+      method: "POST",
+      body: "{}"
+    });
+
+    const previousQuantity =
+      Number(currentPlayer()?.inventory?.[response.rolled.id]) || 0;
+
+    const isNewDiscovery = previousQuantity === 0;
+
     await animateAlienReel(response.rolled, duration);
+
     acceptGameState(response);
+
     const alien = response.rolled;
+
+    // Persistent result card
     elements.rollResult.innerHTML = `
-      <div class="result-card" style="--alien-color:${escapeHtml(alien.color)}">
-        <div class="alien-portrait" aria-hidden="true">${escapeHtml(alien.icon)}</div>
-        <div><span class="tier-label">${escapeHtml(alien.tier)} SIGNAL ACQUIRED</span><h3>${escapeHtml(alien.name)}</h3><p><strong>${formatRate(alien.money_per_sec)} / sec</strong> · Exact rarity ${formatPercent(alien.rarity)}</p></div>
-      </div>`;
+      <div
+        class="result-card result-card-reveal"
+        style="--alien-color:${escapeHtml(alien.color)}"
+      >
+        <div class="result-card-glow"></div>
+
+        <div class="alien-portrait" aria-hidden="true">
+          ${escapeHtml(alien.icon)}
+        </div>
+
+        <div class="result-card-info">
+          <span class="tier-label">
+            ${escapeHtml(alien.tier)} · ACQUIRED
+          </span>
+
+          <h3>${escapeHtml(alien.name)}</h3>
+
+          <div class="result-stats">
+            <div>
+              <small>MONEY / SEC</small>
+              <strong>${formatRate(alien.money_per_sec)}</strong>
+            </div>
+
+            <div>
+              <small>RARITY</small>
+              <strong>${formatRarity(alien.rarityDenominator)}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (isNewDiscovery) {
+      showDiscovery(alien);
+    }
+
     showToast(`${alien.name} added to your hangar.`);
   } catch (error) {
-    if (error.payload?.state) acceptGameState(error.payload);
-    if (error.status === 401) showLogin();
-    else showToast(error.message, "error");
+    if (error.payload?.state) {
+      acceptGameState(error.payload);
+    }
+
+    if (error.status === 401) {
+      showLogin();
+    } else {
+      showToast(error.message, "error");
+    }
   } finally {
     appState.rolling = false;
+
     elements.dice.classList.remove("is-rolling");
     elements.dice.style.removeProperty("--roll-duration");
+
     updateRollStatus();
   }
 }
@@ -449,6 +739,63 @@ elements.shopGrid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-buy-upgrade]");
   if (!button) return;
   handleAction(() => api("/api/buy-shop", { method: "POST", body: JSON.stringify({ upgrade: button.dataset.buyUpgrade }) }), "Research upgrade installed.");
+});
+
+elements.tradeQuantity.addEventListener("change", () => {
+  const selected = inventoryEntries().find(
+    ({ alien }) => alien.id === appState.tradeAlienId
+  );
+
+  if (!selected) return;
+
+  const value = Number(elements.tradeQuantity.value);
+
+  appState.tradeQuantity = Math.min(
+    Math.max(1, Number.isSafeInteger(value) ? value : 1),
+    selected.count
+  );
+
+  renderTrading();
+});
+
+elements.tradeInventoryGrid.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-trade-alien]");
+  if (!button) return;
+
+  appState.tradeAlienId = button.dataset.tradeAlien;
+  appState.tradeQuantity = 1;
+  renderTrading();
+});
+
+elements.tradeRecipient.addEventListener("input", () => {
+  const hasRecipient = elements.tradeRecipient.value.trim().length > 0;
+  const hasAlien = Boolean(appState.tradeAlienId);
+  elements.tradeSendButton.disabled = !(hasRecipient && hasAlien);
+});
+
+elements.tradeSendButton.addEventListener("click", async () => {
+  const recipient = elements.tradeRecipient.value.trim();
+  const alienId = appState.tradeAlienId;
+
+  if (!recipient || !alienId) return;
+
+  const success = await handleAction(
+    () => api("/api/trade", {
+      method: "POST",
+      body: JSON.stringify({
+        recipient,
+        alienId,
+        quantity: appState.tradeQuantity
+      })
+    }),
+    `Alien sent to ${recipient}.`
+  );
+
+  if (success) {
+    appState.tradeAlienId = null;
+    elements.tradeRecipient.value = "";
+    renderTrading();
+  }
 });
 
 elements.placementChoices.addEventListener("click", (event) => {

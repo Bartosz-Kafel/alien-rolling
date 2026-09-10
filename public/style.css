@@ -426,3 +426,763 @@ button:disabled { cursor: not-allowed; }
 @media (max-width: 700px) { .shop-grid { grid-template-columns: 1fr; }.shop-card { min-height: 0; }.shop-card p { min-height: 0; }.table-head, .leaderboard-row { grid-template-columns: 41px 1fr minmax(82px, 108px); padding: 12px 10px; }.table-head span:last-child, .row-rolls { display: none; } }
 @media (max-width: 530px) { :root { --nav-size: 67px; }.app-shell { width: min(100% - 24px, 1120px); padding-top: 96px; }.topbar { width: calc(100% - 16px); height: 74px; padding: 10px 11px; gap: 8px; }.brand-mark { width: 38px; height: 38px; font-size: .78rem; }.player-heading small { display: none; }.balance-block { min-width: 108px; }.balance-block strong { font-size: .96rem; }.bottom-nav { gap: 1px; width: calc(100% - 10px); height: 88px; }.nav-tab { transform: rotate(45deg) scale(.68); }.nav-tab > span { font-size: .57rem; }.nav-tab b { font-size: 1.08rem; }.section-heading { align-items: start; flex-direction: column; gap: 8px; }.dice-button { transform: scale(.88); margin: -3px 0 -12px; }.slot-grid, .alien-grid { grid-template-columns: 1fr; }.rolling-view { min-height: calc(100vh - 225px); }.result-card { width: calc(100% - 8px); }.toast { bottom: 117px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+
+
+/* Trading */
+.trade-panel {
+  display: grid;
+  gap: 12px;
+  max-width: 620px;
+  margin: 0 auto 28px;
+  padding: 22px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 18px 12px 20px 14px;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.25);
+}
+
+.trade-panel label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trade-panel input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 13px 14px;
+  border: 2px solid var(--edge);
+  border-radius: 10px;
+  background: var(--panel-deep);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.trade-panel input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(91, 192, 235, 0.15);
+}
+
+.trade-selection {
+  min-height: 120px;
+}
+
+.trade-selection .alien-card {
+  margin: 0;
+}
+
+.trade-inventory-heading {
+  margin-top: 8px;
+}
+
+.trade-inventory-heading h3 {
+  margin: 0;
+}
+
+.trade-inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.trade-alien-card {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 2px solid var(--edge);
+  border-radius: 14px 10px 16px 12px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.trade-alien-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--cyan);
+}
+
+.trade-alien-card.is-selected {
+  border-color: var(--electric);
+  box-shadow: 0 0 0 2px rgba(111, 255, 233, 0.18);
+}
+
+.trade-alien-card .alien-portrait {
+  width: 58px;
+  height: 58px;
+}
+
+.trade-alien-card strong,
+.trade-alien-card span,
+.trade-alien-card small {
+  display: block;
+}
+
+.trade-alien-card strong {
+  margin-bottom: 3px;
+}
+
+.trade-alien-card span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.trade-alien-card small {
+  margin-top: 5px;
+  color: var(--cyan);
+  font-size: 0.72rem;
+}
+
+.trade-panel .primary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.selected-trade-label {
+  margin-top: 12px;
+  color: var(--electric);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+@media (max-width: 700px) {
+  .trade-inventory-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.trade-quantity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 2px solid var(--edge);
+  border-radius: 12px;
+  background: var(--panel-deep);
+}
+
+.trade-quantity-row label {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.trade-quantity-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trade-quantity-input input {
+  width: 72px;
+  padding: 9px 10px;
+  border: 2px solid var(--edge);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-weight: 800;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.trade-quantity-input input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(91, 192, 235, 0.15);
+}
+
+.trade-quantity-input input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.trade-quantity-input span {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 800;
+  min-width: 30px;
+}
+
+/* Enhanced alien reveal animation */
+
+#alienReel {
+  position: relative;
+  min-height: 112px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+#alienReel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(91, 192, 235, 0.06),
+      transparent
+    );
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
+#alienReel.is-active::before {
+  opacity: 1;
+  animation: reel-sweep 0.7s linear infinite;
+}
+
+.reel-frame {
+  position: relative;
+  display: grid;
+  grid-template-columns: 58px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  width: min(100%, 620px);
+  min-height: 88px;
+  padding: 14px 18px;
+  overflow: hidden;
+  border: 2px solid color-mix(in srgb, var(--alien-color) 60%, var(--edge));
+  border-radius: 16px 11px 18px 12px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--alien-color) 12%, var(--panel)),
+      var(--panel)
+    );
+  box-shadow:
+    0 8px 0 rgba(0, 0, 0, 0.22),
+    0 0 24px color-mix(in srgb, var(--alien-color) 18%, transparent);
+  animation: reel-frame-in 0.16s ease-out;
+}
+
+.reel-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 80%
+  );
+  transform: translateX(-120%);
+  animation: reel-glint 0.35s ease-out;
+}
+
+.reel-frame .alien-portrait {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border: 2px solid color-mix(in srgb, var(--alien-color) 70%, var(--edge));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--alien-color) 14%, var(--panel-deep));
+  font-size: 2rem;
+  box-shadow:
+    0 0 16px color-mix(in srgb, var(--alien-color) 25%, transparent);
+}
+
+.reel-frame-info {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.reel-frame-info b {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reel-frame-info small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.reel-frame em {
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.reel-scan-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  pointer-events: none;
+  background: var(--alien-color);
+  box-shadow: 0 0 12px var(--alien-color);
+  opacity: 0.8;
+  animation: scan-line 0.42s linear infinite;
+}
+
+.reel-frame.is-final {
+  border-color: var(--alien-color);
+  box-shadow:
+    0 8px 0 rgba(0, 0, 0, 0.22),
+    0 0 28px color-mix(in srgb, var(--alien-color) 38%, transparent),
+    0 0 70px color-mix(in srgb, var(--alien-color) 18%, transparent);
+  animation:
+    reel-final-in 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+    reel-final-pulse 1.1s ease-in-out 0.45s infinite;
+}
+
+.reel-frame.is-final .alien-portrait {
+  animation: final-portrait-pop 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reel-frame.is-final em {
+  color: var(--alien-color);
+  text-shadow: 0 0 10px var(--alien-color);
+}
+
+#alienReel.reveal-complete {
+  animation: reveal-complete 0.42s ease-out;
+}
+
+@keyframes reel-frame-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+    filter: blur(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes reel-final-in {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.82);
+    filter: blur(6px);
+  }
+
+  65% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.035);
+    filter: blur(0);
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes final-portrait-pop {
+  0% {
+    transform: scale(0.5) rotate(-8deg);
+    opacity: 0;
+  }
+
+  65% {
+    transform: scale(1.16) rotate(3deg);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes reel-final-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.012);
+  }
+}
+
+@keyframes reel-glint {
+  from {
+    transform: translateX(-120%);
+  }
+
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes scan-line {
+  from {
+    top: 0;
+  }
+
+  to {
+    top: calc(100% - 2px);
+  }
+}
+
+@keyframes reel-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes reveal-complete {
+  0% {
+    filter: brightness(1);
+  }
+
+  35% {
+    filter: brightness(1.45);
+  }
+
+  100% {
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reel-frame,
+  .reel-frame.is-final,
+  .reel-frame .alien-portrait,
+  #alienReel.reveal-complete,
+  #alienReel::before,
+  .reel-scan-line {
+    animation: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .reel-frame {
+    grid-template-columns: 48px 1fr auto;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .reel-frame .alien-portrait {
+    width: 48px;
+    height: 48px;
+    font-size: 1.6rem;
+  }
+
+  .reel-frame-info b {
+    font-size: 0.9rem;
+  }
+
+  .reel-frame em {
+    font-size: 0.58rem;
+  }
+}
+
+/* Persistent roll reward */
+
+.result-card-reveal {
+  position: relative;
+  overflow: hidden;
+  animation: result-card-enter 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.result-card-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 15% 50%,
+      color-mix(in srgb, var(--alien-color) 22%, transparent),
+      transparent 55%
+    );
+  opacity: 0.9;
+}
+
+.result-card-info {
+  position: relative;
+  z-index: 1;
+}
+
+.result-stats {
+  display: flex;
+  gap: 24px;
+  margin-top: 12px;
+}
+
+.result-stats div {
+  display: grid;
+  gap: 3px;
+}
+
+.result-stats small {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.result-stats strong {
+  color: var(--alien-color);
+  font-size: 0.95rem;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--alien-color) 30%, transparent);
+}
+
+@keyframes result-card-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.94);
+    filter: blur(5px);
+  }
+
+  60% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.015);
+    filter: blur(0);
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+
+/* NEW ALIEN DISCOVERY */
+
+.discovery-banner {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.discovery-banner.is-visible {
+  opacity: 1;
+}
+
+.discovery-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      circle at center,
+      color-mix(in srgb, var(--alien-color) 14%, transparent),
+      rgba(0, 0, 0, 0.72) 55%,
+      rgba(0, 0, 0, 0.88)
+    );
+  backdrop-filter: blur(5px);
+  animation: discovery-backdrop 2.8s ease-out;
+}
+
+.discovery-content {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  transform: translateY(35px) scale(0.72);
+  opacity: 0;
+  animation: discovery-enter 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.discovery-label {
+  margin-bottom: 8px;
+  color: var(--alien-color);
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.3em;
+  text-shadow: 0 0 14px var(--alien-color);
+}
+
+.discovery-icon {
+  width: 110px;
+  height: 110px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+
+  border: 3px solid var(--alien-color);
+  border-radius: 24px;
+
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--alien-color) 25%, var(--panel)),
+      var(--panel-deep)
+    );
+
+  font-size: 4rem;
+
+  box-shadow:
+    0 0 25px color-mix(in srgb, var(--alien-color) 55%, transparent),
+    0 0 80px color-mix(in srgb, var(--alien-color) 28%, transparent);
+
+  animation:
+    discovery-icon-pop 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s,
+    discovery-icon-pulse 1.2s ease-in-out 0.8s infinite;
+}
+
+.discovery-title {
+  color: var(--text);
+  font-size: clamp(2.5rem, 8vw, 5.5rem);
+  font-weight: 1000;
+  line-height: 0.9;
+  letter-spacing: 0.04em;
+  text-shadow:
+    0 0 10px var(--alien-color),
+    0 0 35px color-mix(in srgb, var(--alien-color) 65%, transparent),
+    0 0 80px color-mix(in srgb, var(--alien-color) 35%, transparent);
+
+  animation: discovery-title-glitch 0.7s steps(2);
+}
+
+.discovery-name {
+  margin-top: 14px;
+  color: var(--alien-color);
+  font-size: 1.25rem;
+  font-weight: 900;
+  text-shadow: 0 0 14px var(--alien-color);
+}
+
+.discovery-details {
+  display: flex;
+  gap: 9px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.discovery-banner:not(.is-visible) .discovery-content {
+  animation: discovery-exit 0.45s ease-in forwards;
+}
+
+@keyframes discovery-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(35px) scale(0.72);
+  }
+
+  65% {
+    opacity: 1;
+    transform: translateY(-6px) scale(1.06);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes discovery-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-25px) scale(1.04);
+  }
+}
+
+@keyframes discovery-icon-pop {
+  0% {
+    transform: scale(0.2) rotate(-15deg);
+  }
+
+  60% {
+    transform: scale(1.16) rotate(4deg);
+  }
+
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes discovery-icon-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 25px color-mix(in srgb, var(--alien-color) 55%, transparent),
+      0 0 80px color-mix(in srgb, var(--alien-color) 28%, transparent);
+  }
+
+  50% {
+    box-shadow:
+      0 0 35px color-mix(in srgb, var(--alien-color) 80%, transparent),
+      0 0 110px color-mix(in srgb, var(--alien-color) 45%, transparent);
+  }
+}
+
+@keyframes discovery-title-glitch {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.8);
+  }
+
+  20% {
+    opacity: 1;
+    transform: translateX(-5px) scaleX(1.04);
+  }
+
+  40% {
+    transform: translateX(5px) scaleX(0.98);
+  }
+
+  60% {
+    transform: translateX(-2px) scaleX(1.02);
+  }
+
+  100% {
+    transform: translateX(0) scaleX(1);
+  }
+}
+
+@keyframes discovery-backdrop {
+  0% {
+    opacity: 0;
+  }
+
+  15% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .result-card-reveal,
+  .discovery-content,
+  .discovery-icon,
+  .discovery-title,
+  .discovery-backdrop {
+    animation: none;
+  }
+}
