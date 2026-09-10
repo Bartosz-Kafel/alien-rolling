@@ -1,6 +1,0 @@
-[build]
-  command = "npm run build"
-  publish = "public" # Change "dist" to "public" or "." depending on where your index.html goes after a build.
-
-[functions]
-  directory = "netlify/functions"

@@ -1,0 +1,50 @@
+{
+  "users": {
+    "e9e0de65-9b7d-4f4b-9f2d-4959d0eae4c9": {
+      "name": "BartoStwor",
+      "password": "--q2jYHmMsEnj2_XSJbZnw:5ERspF91i2pp2qI8owlOdW50_DsUmzdXSeZWuTgvCPEDnosxs-xr1NMWyrXta_gMXU1B2MIF240PgQxTTGMZ-w",
+      "money": 158.6733,
+      "total_rolls": 8,
+      "shop_purchases": {
+        "luck_boost": 0,
+        "rolling_speed": 0,
+        "money_increase": 0
+      },
+      "inventory": {
+        "alien_019": 2,
+        "alien_046": 1,
+        "alien_059": 1,
+        "alien_107": 1,
+        "alien_018": 1,
+        "alien_035": 1,
+        "alien_036": 1
+      },
+      "placed_aliens": [
+        {
+          "alien_id": "alien_174",
+          "last_collected": 1789073970029
+        }
+      ]
+    },
+    "d78838ee-13e8-4f4a-9b86-9a7938b2fe68": {
+      "name": "Sergio",
+      "password": "ZFRN5bxI_I3S8mDvCCQ2gw:4aYOeCGJvk35wTlh5rSdI91tEcYP84wR3qJXxEhopMLAcwfz-usTfZ2YGHsgDo-7vDMaG1SAj8KNscs3qQhPnw",
+      "money": 54.8793,
+      "total_rolls": 3,
+      "shop_purchases": {
+        "luck_boost": 0,
+        "rolling_speed": 0,
+        "money_increase": 0
+      },
+      "inventory": {
+        "alien_062": 1
+      },
+      "placed_aliens": [
+        {
+          "alien_id": "alien_070",
+          "last_collected": 1789073951511
+        }
+      ]
+    }
+  }
+}

@@ -1,4 +1,3 @@
-"use strict";
 
 const crypto = require("crypto");
 const express = require("express");
@@ -6,7 +5,6 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const DATA_FILE = path.join(__dirname, "data.json");
 const SESSION_COOKIE = "afk_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
@@ -699,6 +697,4 @@ setInterval(() => {
   for (const [token, session] of sessions) if (session.expiresAt < now) sessions.delete(token);
 }, 60 * 60 * 1000).unref();
 
-app.listen(Number.isFinite(PORT) ? PORT : 3000, () => {
-  console.log(`AFK Alien Dice is running on http://localhost:${Number.isFinite(PORT) ? PORT : 3000}`);
-});
+module.exports = app;
