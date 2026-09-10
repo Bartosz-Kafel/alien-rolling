@@ -1,10 +1,20 @@
-
 const crypto = require("crypto");
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const { Pool } = require("pg");
+
 
 const app = express();
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
+
+const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const DATA_FILE = path.join(__dirname, "data.json");
 const SESSION_COOKIE = "afk_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
@@ -40,7 +50,14 @@ const SPECIES = [
 ];
 
 // Generates 11,100 unique combinations and takes the first 1,010 (10x your original 101 limit)
-const ALIEN_NAMES = PREFIXES.flatMap((prefix) => SPECIES.map((species) => `${prefix} ${species}`)).slice(0, 1010);
+const ALIEN_NAMES = [];
+
+for (let index = 0; index < 1010; index += 1) {
+  const prefix = PREFIXES[index % PREFIXES.length];
+  const species = SPECIES[Math.floor(index / PREFIXES.length) % SPECIES.length];
+
+  ALIEN_NAMES.push(`${prefix} ${species}`);
+}
 
 // Expanded by over 10x (165 sci-fi, space, alien, and abstract icons)
 const ALIEN_ICONS = [
@@ -64,22 +81,36 @@ const ALIEN_ICONS = [
 
 
 // Expanded by 10x (80 progression tiers scaled proportionally up to index 1010)
-const TIER_BY_INDEX = [
-  ["Garbage", 10], ["Space Junk", 20], ["Bio-Waste", 30], ["Scrap Metal", 40], ["Bottom Feeder", 50], ["Fodder", 60], ["Stray", 70], ["Drifter", 80], ["Rookie", 90], ["Survivor", 100],
-  ["Scavenger", 115], ["Marauder", 130], ["Vanguard", 145], ["Enforcer", 160], ["Bio-Hazard", 175], ["Toxic Mutated", 190], ["Cyber-Augmented", 205], ["Apex Stalker", 220], ["Infiltrator", 235], ["Overlord", 250],
-  ["Anomaly", 270], ["Glitch", 290], ["Void Walker", 310], ["Abyssal", 330], ["Phantom", 350], ["Specter", 370], ["Chronos-Warped", 390], ["Quantum Shifted", 410], ["Singularity", 430], ["Eon Walker", 450],
-  ["World Eater", 470], ["Planet Buster", 490], ["Star Crusher", 510], ["Solar Flare", 530], ["Supernova", 550], ["Event Horizon", 570], ["Cosmic Storm", 590], ["Nebula Spawn", 610], ["Stellar Sovereign", 630], ["Galaxy Tyrant", 650],
-  ["Astral Titan", 665], ["Celestial", 680], ["Immortal", 695], ["Eldritch Horror", 710], ["Void Sovereign", 725], ["Nether King", 740], ["Aether Lord", 755], ["Primordial", 770], ["Ancient Terror", 785], ["Doomsday", 800],
-  ["Demi-God", 812], ["Godlike", 824], ["Deity", 836], ["Pantheon Elite", 848], ["Reality Warper", 860], ["Time Weaver", 872], ["Space Bender", 884], ["Dimensional Lord", 896], ["Astral Emperor", 908], ["Infinite", 920],
-  ["Omnipotent", 927], ["Omnipresent", 934], ["Absolute Zero", 941], ["Eternal Flame", 948], ["Cosmic Blueprint", 955], ["Matrix Core", 962], ["Singularity Alpha", 969], ["Void Omega", 976], ["Grand Architect", 983], ["Universal Constant", 990],
-  ["Beyond Existence", 992], ["Timeless", 994], ["Outer God", 996], ["Multiversal", 998], ["Omniversal", 1000], ["The Zenith", 1002], ["Apex Predestined", 1004], ["Final Paradox", 1006], ["The Absolute", 1008], ["True Entity", 1010]
+const TIER_NAMES = [
+  "Garbage", "Space Junk", "Bio-Waste", "Scrap Metal", "Bottom Feeder", "Fodder", "Stray", "Drifter", "Rookie", "Survivor",
+  "Scavenger", "Marauder", "Vanguard", "Enforcer", "Bio-Hazard", "Toxic Mutated", "Cyber-Augmented", "Apex Stalker", "Infiltrator", "Overlord",
+  "Anomaly", "Glitch", "Void Walker", "Abyssal", "Phantom", "Specter", "Chronos-Warped", "Quantum Shifted", "Singularity", "Eon Walker",
+  "World Eater", "Planet Buster", "Star Crusher", "Solar Flare", "Supernova", "Event Horizon", "Cosmic Storm", "Nebula Spawn", "Stellar Sovereign", "Galaxy Tyrant",
+  "Astral Titan", "Celestial", "Immortal", "Eldritch Horror", "Void Sovereign", "Nether King", "Aether Lord", "Primordial", "Ancient Terror", "Doomsday",
+  "Demi-God", "Godlike", "Deity", "Pantheon Elite", "Reality Warper", "Time Weaver", "Space Bender", "Dimensional Lord", "Astral Emperor", "Infinite",
+  "Omnipotent", "Omnipresent", "Absolute Zero", "Eternal Flame", "Cosmic Blueprint", "Matrix Core", "Singularity Alpha", "Void Omega", "Grand Architect", "Universal Constant",
+  "Beyond Existence", "Timeless", "Outer God", "Multiversal", "Omniversal", "The Zenith", "Apex Predestined", "Final Paradox", "The Absolute", "True Entity"
 ];
 
 
 const roundFinancial = (value) => Math.round(value * 10_000) / 10_000;
 
-const getTier = (index) =>
-  TIER_BY_INDEX.find(([, maxIndex]) => index <= maxIndex)[0];
+function getTier(index) {
+  const progress = index / (ALIEN_NAMES.length - 1);
+
+  /*
+   * Early tiers contain more aliens.
+   * Endgame tiers become increasingly exclusive.
+   */
+  const tierProgress = Math.pow(progress, 1.35);
+
+  const tierIndex = Math.min(
+    TIER_NAMES.length - 1,
+    Math.floor(tierProgress * TIER_NAMES.length)
+  );
+
+  return TIER_NAMES[tierIndex];
+}
 
 function rarityDenominator(index) {
   const progress = index / (ALIEN_NAMES.length - 1);
@@ -87,9 +118,50 @@ function rarityDenominator(index) {
   return Math.max(
     2,
     Math.round(
-      2 * Math.pow(50_000_000_000_000 / 2, progress ** 1.35)
+      2 * Math.pow(
+        50_000_000_000_000 / 2,
+        progress ** 0.9
+      )
     )
   );
+}
+
+function rarityColor(denominator) {
+  const rarity = Math.log10(Math.max(2, denominator));
+
+  if (rarity < 1) {
+    return "hsl(0 0% 68%)";       // Common
+  }
+
+  if (rarity < 2) {
+    return "hsl(120 65% 55%)";    // Uncommon
+  }
+
+  if (rarity < 4) {
+    return "hsl(210 85% 62%)";    // Rare
+  }
+
+  if (rarity < 6) {
+    return "hsl(270 80% 68%)";    // Epic
+  }
+
+  if (rarity < 8) {
+    return "hsl(35 90% 60%)";     // Legendary
+  }
+
+  if (rarity < 10) {
+    return "hsl(320 85% 65%)";    // Mythical
+  }
+
+  if (rarity < 12) {
+    return "hsl(0 85% 62%)";      // Godlike
+  }
+
+  if (rarity < 13) {
+    return "hsl(185 90% 65%)";    // Cosmic
+  }
+
+  return "hsl(45 100% 75%)";      // Absolute
 }
 
 const ALIENS = ALIEN_NAMES.map((name, index) => {
@@ -104,7 +176,7 @@ const ALIENS = ALIEN_NAMES.map((name, index) => {
     name,
     tier: getTier(index),
     icon: ALIEN_ICONS[index % ALIEN_ICONS.length],
-    color: `hsl(${(index * 37 + 165) % 360} 85% 63%)`,
+    color: rarityColor(denominator),
     rarity,
     rarityDenominator: denominator,
     money_per_sec: roundFinancial(moneyPerSec)
@@ -123,6 +195,237 @@ function initialDatabase() {
   return { users: {} };
 }
 
+let database = initialDatabase();
+let databaseBusy = false;
+const databaseQueue = [];
+
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      money NUMERIC NOT NULL,
+      total_rolls INTEGER NOT NULL,
+      shop_purchases JSONB NOT NULL,
+      inventory JSONB NOT NULL,
+      placed_aliens JSONB NOT NULL
+    )
+  `);
+
+  const countResult = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM users"
+  );
+
+  const databaseIsEmpty = countResult.rows[0].count === 0;
+
+  /*
+   * One-time migration from data.json.
+   *
+   * We intentionally keep data.json untouched as a backup.
+   */
+  if (databaseIsEmpty && fs.existsSync(DATA_FILE)) {
+    try {
+      const parsed = JSON.parse(
+        fs.readFileSync(DATA_FILE, "utf8")
+      );
+
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        parsed.users &&
+        typeof parsed.users === "object" &&
+        !Array.isArray(parsed.users)
+      ) {
+        const users = Object.entries(parsed.users);
+
+        if (users.length > 0) {
+          console.log(
+            `Migrating ${users.length} player(s) from data.json to PostgreSQL...`
+          );
+
+          const client = await pool.connect();
+
+          try {
+            await client.query("BEGIN");
+
+            for (const [id, user] of users) {
+              if (!validatePlayer(user)) {
+                console.warn(
+                  `Skipping invalid player ${id} during migration.`
+                );
+                continue;
+              }
+
+              await client.query(
+                `
+                  INSERT INTO users (
+                    id,
+                    name,
+                    password,
+                    money,
+                    total_rolls,
+                    shop_purchases,
+                    inventory,
+                    placed_aliens
+                  )
+                  VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)
+                  ON CONFLICT (id) DO NOTHING
+                `,
+                [
+                  id,
+                  user.name,
+                  user.password,
+                  user.money,
+                  user.total_rolls,
+                  JSON.stringify(user.shop_purchases),
+                  JSON.stringify(user.inventory),
+                  JSON.stringify(user.placed_aliens)
+                ]
+              );
+            }
+
+            await client.query("COMMIT");
+
+            console.log("data.json migration completed.");
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            client.release();
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to migrate data.json:", error);
+      throw error;
+    }
+  }
+
+  await loadDatabaseFromPostgres();
+
+  console.log(
+    `PostgreSQL database ready. Loaded ${Object.keys(database.users).length} player(s).`
+  );
+}
+
+async function loadDatabaseFromPostgres() {
+  const result = await pool.query(`
+    SELECT
+      id,
+      name,
+      password,
+      money,
+      total_rolls,
+      shop_purchases,
+      inventory,
+      placed_aliens
+    FROM users
+  `);
+
+  database = initialDatabase();
+
+  for (const row of result.rows) {
+    const user = {
+      name: row.name,
+      password: row.password,
+      money: Number(row.money),
+      total_rolls: Number(row.total_rolls),
+      shop_purchases: row.shop_purchases,
+      inventory: row.inventory,
+      placed_aliens: row.placed_aliens
+    };
+
+    if (!validatePlayer(user)) {
+      console.warn(
+        `Skipping invalid player ${row.id} loaded from PostgreSQL.`
+      );
+      continue;
+    }
+
+    database.users[row.id] = user;
+  }
+}
+
+async function persistDatabase() {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    for (const [id, user] of Object.entries(database.users)) {
+      await client.query(
+        `
+          INSERT INTO users (
+            id,
+            name,
+            password,
+            money,
+            total_rolls,
+            shop_purchases,
+            inventory,
+            placed_aliens
+          )
+          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)
+          ON CONFLICT (id)
+          DO UPDATE SET
+            name = EXCLUDED.name,
+            password = EXCLUDED.password,
+            money = EXCLUDED.money,
+            total_rolls = EXCLUDED.total_rolls,
+            shop_purchases = EXCLUDED.shop_purchases,
+            inventory = EXCLUDED.inventory,
+            placed_aliens = EXCLUDED.placed_aliens
+        `,
+        [
+          id,
+          user.name,
+          user.password,
+          user.money,
+          user.total_rolls,
+          JSON.stringify(user.shop_purchases),
+          JSON.stringify(user.inventory),
+          JSON.stringify(user.placed_aliens)
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function withDatabaseLock(work) {
+  return new Promise((resolve, reject) => {
+    databaseQueue.push({ work, resolve, reject });
+    drainDatabaseQueue();
+  });
+}
+
+async function drainDatabaseQueue() {
+  if (databaseBusy || databaseQueue.length === 0) return;
+
+  databaseBusy = true;
+  const job = databaseQueue.shift();
+
+  try {
+    const result = await job.work();
+
+    await persistDatabase();
+
+    job.resolve(result);
+  } catch (error) {
+    job.reject(error);
+  } finally {
+    databaseBusy = false;
+    queueMicrotask(drainDatabaseQueue);
+  }
+}
+
 function loadDatabase() {
   if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, JSON.stringify(initialDatabase(), null, 2), "utf8");
@@ -133,40 +436,6 @@ function loadDatabase() {
     throw new Error("data.json must contain an object with a users object.");
   }
   return parsed;
-}
-
-let database = loadDatabase();
-let databaseBusy = false;
-const databaseQueue = [];
-
-function persistDatabase() {
-  const temporaryFile = `${DATA_FILE}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temporaryFile, JSON.stringify(database, null, 2), "utf8");
-  fs.renameSync(temporaryFile, DATA_FILE);
-}
-
-/* Every database mutation is serialized, and each completed mutation is written atomically. */
-function withDatabaseLock(work) {
-  return new Promise((resolve, reject) => {
-    databaseQueue.push({ work, resolve, reject });
-    drainDatabaseQueue();
-  });
-}
-
-function drainDatabaseQueue() {
-  if (databaseBusy || databaseQueue.length === 0) return;
-  databaseBusy = true;
-  const job = databaseQueue.shift();
-  try {
-    const result = job.work();
-    persistDatabase();
-    job.resolve(result);
-  } catch (error) {
-    job.reject(error);
-  } finally {
-    databaseBusy = false;
-    queueMicrotask(drainDatabaseQueue);
-  }
 }
 
 function parseCookies(header = "") {
@@ -361,18 +630,33 @@ function gameStateFor(userId) {
 }
 
 function pickAlien(player) {
-  const luck = totalUpgradeBonus(
-    "luck_boost",
-    player.shop_purchases.luck_boost
+  const luck = Math.max(
+    0,
+    totalUpgradeBonus(
+      "luck_boost",
+      player.shop_purchases.luck_boost
+    )
   );
 
-  const weights = ALIENS.map((alien, index) => {
-    const progress = index / (ALIENS.length - 1);
+  /*
+   * Luck changes the SHAPE of the rarity curve.
+   *
+   * 0 Luck:
+   *   exponent = 1
+   *   Original rarity distribution.
+   *
+   * More Luck:
+   *   exponent gets smaller.
+   *   Extremely rare aliens become dramatically more competitive.
+   *
+   * This intentionally allows extreme endgame Luck to destroy
+   * normal progression. That is the reward for reaching it.
+   */
+  const rarityExponent =
+    1 / (1 + 2 * Math.log10(1 + luck));
 
-    const luckMultiplier =
-      1 + luck * 2 * (progress ** 1.6);
-
-    return alien.rarity * luckMultiplier;
+  const weights = ALIENS.map((alien) => {
+    return Math.pow(alien.rarity, rarityExponent);
   });
 
   const weightTotal = weights.reduce(
@@ -391,14 +675,16 @@ function pickAlien(player) {
     if (roll <= 0 || index === ALIENS.length - 1) {
       return {
         alien: ALIENS[index],
-        chance: weights[index] / weightTotal
+        chance: weights[index] / weightTotal,
+        rarityExponent
       };
     }
   }
 
   return {
     alien: ALIENS[0],
-    chance: weights[0] / weightTotal
+    chance: weights[0] / weightTotal,
+    rarityExponent
   };
 }
 
@@ -697,4 +983,21 @@ setInterval(() => {
   for (const [token, session] of sessions) if (session.expiresAt < now) sessions.delete(token);
 }, 60 * 60 * 1000).unref();
 
-module.exports = app;
+initializeDatabase()
+  .then(() => {
+    app.listen(
+      Number.isFinite(PORT) ? PORT : 3000,
+      "0.0.0.0",
+      () => {
+        console.log(
+          `AFK Alien Dice is running on port ${
+            Number.isFinite(PORT) ? PORT : 3000
+          }`
+        );
+      }
+    );
+  })
+  .catch((error) => {
+    console.error("Failed to initialize PostgreSQL:", error);
+    process.exit(1);
+  });
