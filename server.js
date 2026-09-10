@@ -426,18 +426,6 @@ async function drainDatabaseQueue() {
   }
 }
 
-function loadDatabase() {
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(initialDatabase(), null, 2), "utf8");
-    return initialDatabase();
-  }
-  const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !parsed.users || typeof parsed.users !== "object" || Array.isArray(parsed.users)) {
-    throw new Error("data.json must contain an object with a users object.");
-  }
-  return parsed;
-}
-
 function parseCookies(header = "") {
   return Object.fromEntries(header.split(";").map((part) => {
     const separator = part.indexOf("=");

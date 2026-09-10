@@ -1,4 +1,186 @@
-"use strict";
+// ================================
+// AFK ALIEN DICE - SOUND ENGINE
+// ================================
+
+let audioCtx = null;
+
+function getAudioContext() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    if (audioCtx.state === "suspended") {
+        audioCtx.resume();
+    }
+
+    return audioCtx;
+}
+
+function tone({
+    frequency = 440,
+    endFrequency = frequency,
+    duration = 0.2,
+    volume = 0.12,
+    type = "sine",
+    delay = 0
+}) {
+    const ctx = getAudioContext();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    const start = ctx.currentTime + delay;
+    const end = start + duration;
+
+    osc.type = type;
+
+    osc.frequency.setValueAtTime(frequency, start);
+
+    if (endFrequency !== frequency) {
+        osc.frequency.exponentialRampToValueAtTime(
+            Math.max(20, endFrequency),
+            end
+        );
+    }
+
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(start);
+    osc.stop(end + 0.02);
+}
+
+function playRollSound() {
+    tone({
+        frequency: 120,
+        endFrequency: 500,
+        duration: 0.35,
+        volume: 0.10,
+        type: "sine"
+    });
+
+    tone({
+        frequency: 250,
+        endFrequency: 900,
+        duration: 0.18,
+        volume: 0.045,
+        type: "triangle",
+        delay: 0.08
+    });
+}
+
+
+function playRevealSound() {
+    tone({
+        frequency: 180,
+        endFrequency: 700,
+        duration: 0.45,
+        volume: 0.10,
+        type: "sine"
+    });
+
+    tone({
+        frequency: 600,
+        endFrequency: 1100,
+        duration: 0.35,
+        volume: 0.055,
+        type: "triangle",
+        delay: 0.18
+    });
+}
+
+
+function playDiscoverySound() {
+    tone({
+        frequency: 180,
+        endFrequency: 450,
+        duration: 0.35,
+        volume: 0.12,
+        type: "sine"
+    });
+
+    tone({
+        frequency: 450,
+        endFrequency: 900,
+        duration: 0.45,
+        volume: 0.10,
+        type: "triangle",
+        delay: 0.22
+    });
+
+    tone({
+        frequency: 900,
+        endFrequency: 1400,
+        duration: 0.55,
+        volume: 0.065,
+        type: "sine",
+        delay: 0.38
+    });
+}
+
+
+function playPurchaseSound() {
+    tone({
+        frequency: 500,
+        duration: 0.12,
+        volume: 0.08,
+        type: "triangle"
+    });
+
+    tone({
+        frequency: 750,
+        duration: 0.18,
+        volume: 0.07,
+        type: "triangle",
+        delay: 0.09
+    });
+}
+
+
+function playTradeSound() {
+    tone({
+        frequency: 350,
+        endFrequency: 600,
+        duration: 0.20,
+        volume: 0.07,
+        type: "sine"
+    });
+
+    tone({
+        frequency: 600,
+        endFrequency: 900,
+        duration: 0.25,
+        volume: 0.06,
+        type: "triangle",
+        delay: 0.16
+    });
+}
+
+
+function playErrorSound() {
+    tone({
+        frequency: 180,
+        endFrequency: 100,
+        duration: 0.20,
+        volume: 0.09,
+        type: "sawtooth"
+    });
+}
+
+
+function playClickSound() {
+    tone({
+        frequency: 700,
+        endFrequency: 500,
+        duration: 0.06,
+        volume: 0.035,
+        type: "sine"
+    });
+}
 
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -164,8 +346,6 @@ function firstEmptySlot() {
 function priceClass(cost) {
   return appState.estimatedMoney + 0.00001 >= cost ? "affordable" : "unaffordable";
 }
-
-
 
 function alienCard(alien, count = null, action = "") {
   return `
@@ -442,7 +622,10 @@ async function handleAction(request, successMessage) {
   } catch (error) {
     if (error.payload?.state) acceptGameState(error.payload);
     if (error.status === 401) return showLogin();
+
+    playErrorSound();
     showToast(error.message, "error");
+    
     return false;
   }
 }
@@ -573,6 +756,8 @@ function showDiscovery(alien) {
 async function rollDice() {
   if (appState.rolling || !currentPlayer()) return;
 
+  playRollSound();
+
   const duration = Math.max(
     100,
     Number(currentPlayer().rollAnimationMs) || 2200
@@ -597,6 +782,8 @@ async function rollDice() {
     const isNewDiscovery = previousQuantity === 0;
 
     await animateAlienReel(response.rolled, duration);
+
+    playRevealSound();
 
     acceptGameState(response);
 
@@ -637,6 +824,7 @@ async function rollDice() {
     `;
 
     if (isNewDiscovery) {
+      playDiscoverySound();
       showDiscovery(alien);
     }
 
@@ -792,6 +980,8 @@ elements.tradeSendButton.addEventListener("click", async () => {
   );
 
   if (success) {
+    playTradeSound();
+
     appState.tradeAlienId = null;
     elements.tradeRecipient.value = "";
     renderTrading();
@@ -799,13 +989,25 @@ elements.tradeSendButton.addEventListener("click", async () => {
 });
 
 elements.placementChoices.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-place-alien]");
-  if (!button || appState.placementSlot === null) return;
-  const slotIndex = appState.placementSlot;
-  handleAction(
-    () => api("/api/place-alien", { method: "POST", body: JSON.stringify({ alienId: button.dataset.placeAlien, slotIndex }) }),
-    "Alien deployed. Passive credits are now online."
-  ).then((success) => { if (success) closePlacement(); });
+    const button = event.target.closest("[data-place-alien]");
+    if (!button || appState.placementSlot === null) return;
+
+    const slotIndex = appState.placementSlot;
+
+    handleAction(
+        () => api("/api/place-alien", {
+            method: "POST",
+            body: JSON.stringify({
+                slotIndex,
+                alienId: button.dataset.placeAlien
+            })
+        }),
+        "Alien deployed to your container."
+    ).then((success) => {
+        if (success) {
+            closePlacement();
+        }
+    });
 });
 
 elements.logoutButton.addEventListener("click", async () => {
@@ -826,14 +1028,20 @@ setInterval(() => {
   }
   appState.lastClientTick = now;
 }, 250);
+
+document.addEventListener("pointerdown", () => {
+    getAudioContext();
+}, { once: true });
+
 setInterval(syncGameState, 5000);
 
 (async () => {
-  try {
-    const response = await api("/api/game-state");
-    acceptGameState(response);
-    showGame();
-  } catch {
-    showLogin();
-  }
+    try {
+        const response = await api("/api/game-state");
+        acceptGameState(response);
+        showGame();
+    } catch (error) {
+        console.error("Failed to load game state:", error);
+        showLogin();
+    }
 })();
