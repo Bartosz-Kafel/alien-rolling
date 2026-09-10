@@ -1,0 +1,14 @@
+{
+  "name": "express-netlify-app",
+  "version": "1.0.0",
+  "description": "Express app adapted for Netlify serverless functions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "echo 'No build step required for static assets'"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "serverless-http": "^3.2.0"
+  }
+}
