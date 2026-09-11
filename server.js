@@ -762,7 +762,7 @@ function pickAlien(player) {
   // 0 permanent + 10× temporary = 9 effective Luck
   // 10% permanent + 10× temporary = 10× the normal luck effect.
   const luck =
-    (1 + permanentLuck) * ((temporaryLuck - 1) * 0.25);
+    (1 + permanentLuck) * ((temporaryLuck - 1) * 0.125);
 
   /*
    * Luck changes the SHAPE of the rarity curve.
