@@ -641,7 +641,7 @@ function pickAlien(player) {
    * normal progression. That is the reward for reaching it.
    */
   const rarityExponent = Math.max(
-      0.8,
+      0.85,
       1 / (1 + 0.35 * Math.log10(1 + luck))
   );
 
