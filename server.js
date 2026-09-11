@@ -779,7 +779,7 @@ function pickAlien(player) {
    * normal progression. That is the reward for reaching it.
    */
   const rarityExponent =
-    1 / Math.sqrt(1 + luck * 0.12, 1);
+    1 / Math.sqrt(1 + luck * 0.012, 1);
 
   const weights = ALIENS.map((alien) => {
     return Math.pow(alien.rarity, rarityExponent);
