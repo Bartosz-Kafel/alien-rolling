@@ -640,8 +640,10 @@ function pickAlien(player) {
    * This intentionally allows extreme endgame Luck to destroy
    * normal progression. That is the reward for reaching it.
    */
-  const rarityExponent =
-    1 / (1 + 2 * Math.log10(1 + luck));
+  const rarityExponent = Math.max(
+      0.8,
+      1 / (1 + 0.35 * Math.log10(1 + luck))
+  );
 
   const weights = ALIENS.map((alien) => {
     return Math.pow(alien.rarity, rarityExponent);
