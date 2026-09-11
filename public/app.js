@@ -58,7 +58,7 @@ function playRollSound() {
     tone({
         frequency: 120,
         endFrequency: 500,
-        duration: 0.35,
+        duration: 2,
         volume: 0.10,
         type: "sine"
     });

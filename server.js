@@ -120,7 +120,7 @@ function rarityDenominator(index) {
     Math.round(
       2 * Math.pow(
         50_000_000_000_000 / 2,
-        progress ** 0.9
+        progress ** 0.7
       )
     )
   );
