@@ -54,9 +54,9 @@ const ALIEN_NAMES = [];
 
 for (let index = 0; index < 1010; index += 1) {
   const prefix = PREFIXES[index % PREFIXES.length];
-  const species = SPECIES[Math.floor(index / PREFIXES.length) % SPECIES.length];
+  const code = String(index + 1).padStart(4, "0");
 
-  ALIEN_NAMES.push(`${prefix} ${species}`);
+  ALIEN_NAMES.push(`${prefix}-${code}`);
 }
 
 // Expanded by over 10x (165 sci-fi, space, alien, and abstract icons)
