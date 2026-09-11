@@ -214,8 +214,15 @@ const elements = {
   rollResult: $("#rollResult"),
   rollHint: $("#rollHint"),
   cooldown: $("#cooldownDisplay"),
-  logoutButton: $("#logoutButton")
+  logoutButton: $("#logoutButton"),
+  temporaryLuckMoney: $("#temporaryLuckMoney"),
+  temporaryLuckPreview: $("#temporaryLuckPreview"),
+  temporaryLuckActivateButton: $("#temporaryLuckActivateButton"),
+  temporaryLuckStatus: $(".temporary-luck-status"),
+  temporaryLuckStatusValue: $("#temporaryLuckStatusValue"),
+  temporaryLuckStatusTimer: $("#temporaryLuckStatusTimer")
 };
+
 
 const appState = {
   game: null,
@@ -290,6 +297,51 @@ function formatBonus(key, amount) {
   if (key === "luck_boost") return `${percentage} rare-roll bias`;
   if (key === "rolling_speed") return `${percentage} shorter roll animation`;
   return `${percentage} alien income`;
+}
+
+function temporaryLuckFromMoney(amount) {
+  const money = Math.max(0, Number(amount) || 0);
+
+  if (money <= 0) {
+    return 0;
+  }
+
+  if (money <= 1_000_000) {
+    return 10 * Math.pow(money / 1_000_000, 0.35);
+  }
+
+  return 10 * Math.pow(money / 1_000_000, 0.27);
+}
+
+function formatTemporaryLuck(value) {
+  const luck = Number(value) || 0;
+
+  if (luck <= 0) {
+    return "0×";
+  }
+
+  if (luck >= 100) {
+    return `${luck.toFixed(0)}×`;
+  }
+
+  if (luck >= 10) {
+    return `${luck.toFixed(1)}×`;
+  }
+
+  return `${luck.toFixed(2)}×`;
+}
+
+function updateTemporaryLuckPreview() {
+  if (!elements.temporaryLuckMoney || !elements.temporaryLuckPreview) {
+    return;
+  }
+
+  const luck = temporaryLuckFromMoney(
+    elements.temporaryLuckMoney.value
+  );
+
+  elements.temporaryLuckPreview.textContent =
+    formatTemporaryLuck(luck);
 }
 
 function showToast(message, type = "normal") {
@@ -553,6 +605,32 @@ function updateRollStatus() {
   }
 }
 
+function updateTemporaryLuckStatus() {
+  const player = currentPlayer();
+
+  if (!player || !player.temporaryLuck) {
+    return;
+  }
+
+  const luck = Number(player.temporaryLuck.value) || 0;
+  const expiresAt = Number(player.temporaryLuck.expiresAt) || 0;
+  const remainingMs = expiresAt - Date.now();
+
+  if (luck > 0 && remainingMs > 0) {
+    const remainingSeconds = Math.ceil(remainingMs / 1000);
+
+    elements.temporaryLuckStatus.classList.add("is-active");
+    elements.temporaryLuckStatusValue.textContent =
+      `${formatTemporaryLuck(luck)} LUCK`;
+    elements.temporaryLuckStatusTimer.textContent =
+      `${String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:${String(remainingSeconds % 60).padStart(2, "0")}`;
+  } else {
+    elements.temporaryLuckStatus.classList.remove("is-active");
+    elements.temporaryLuckStatusValue.textContent = "Not active";
+    elements.temporaryLuckStatusTimer.textContent = "Activate in Shop";
+  }
+}
+
 function updateDynamicAffordability() {
   document.querySelectorAll("[data-cost]").forEach((button) => {
     const cost = Number(button.dataset.cost);
@@ -576,6 +654,7 @@ function renderAll() {
   renderLeaderboard();
   updateRollStatus();
   updateDynamicAffordability();
+  updateTemporaryLuckStatus();
   setView(appState.activeView, false);
 }
 
@@ -916,6 +995,37 @@ function showGame() {
   elements.app.setAttribute("aria-hidden", "false");
 }
 
+elements.temporaryLuckMoney.addEventListener("input", updateTemporaryLuckPreview);
+
+updateTemporaryLuckPreview();
+
+elements.temporaryLuckActivateButton.addEventListener("click", async () => {
+  const amount = Number(elements.temporaryLuckMoney.value);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast("Enter a valid amount.");
+    return;
+  }
+
+  elements.temporaryLuckActivateButton.disabled = true;
+
+  try {
+    const game = await api("/api/buy-temporary-luck", {
+      method: "POST",
+      body: JSON.stringify({
+        amount
+      })
+    });
+
+    acceptGameState(game);
+    showToast("Luck Boost activated.");
+  } catch (error) {
+    showToast(error.message || "Could not activate Luck Boost.");
+  } finally {
+    elements.temporaryLuckActivateButton.disabled = false;
+  }
+});
+
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const submit = elements.loginForm.querySelector("button[type=submit]");
@@ -1063,6 +1173,7 @@ setInterval(() => {
     appState.estimatedMoney += currentPlayer().moneyPerSecond * seconds;
     renderHeader();
     updateRollStatus();
+    updateTemporaryLuckStatus();
     updateDynamicAffordability();
   }
   appState.lastClientTick = now;

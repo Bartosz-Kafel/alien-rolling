@@ -148,7 +148,7 @@ function rarityDenominator(index) {
     Math.round(
       2 * Math.pow(
         50_000_000_000_000 / 2,
-        progress ** 0.75
+        progress ** 0.85
       )
     )
   );
@@ -219,6 +219,32 @@ const UPGRADE_CONFIG = Object.freeze({
   money_increase: { label: "Money Increase", description: "Raises earnings from every placed alien.", baseBonus: 0.10, unit: "yield" }
 });
 
+const TEMPORARY_LUCK_CONFIG = Object.freeze({
+  durationMs: 60 * 1000,
+  maxMoney: MAX_MONEY
+});
+
+function temporaryLuckFromMoney(amount) {
+  const money = Math.min(
+    TEMPORARY_LUCK_CONFIG.maxMoney,
+    Math.max(0, Number(amount) || 0)
+  );
+
+  if (money <= 0) {
+    return 0;
+  }
+
+  if (money <= 1_000_000) {
+    return roundFinancial(
+      10 * Math.pow(money / 1_000_000, 0.35)
+    );
+  }
+
+  return roundFinancial(
+    10 * Math.pow(money / 1_000_000, 0.27)
+  );
+}
+
 function initialDatabase() {
   return { users: {} };
 }
@@ -237,8 +263,16 @@ async function initializeDatabase() {
       total_rolls INTEGER NOT NULL,
       shop_purchases JSONB NOT NULL,
       inventory JSONB NOT NULL,
-      placed_aliens JSONB NOT NULL
+      placed_aliens JSONB NOT NULL,
+      temporary_luck NUMERIC NOT NULL DEFAULT 0,
+      temporary_luck_expires_at NUMERIC NOT NULL DEFAULT 0
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS temporary_luck NUMERIC NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS temporary_luck_expires_at NUMERIC NOT NULL DEFAULT 0
   `);
 
   const countResult = await pool.query(
@@ -339,15 +373,17 @@ async function initializeDatabase() {
 
 async function loadDatabaseFromPostgres() {
   const result = await pool.query(`
-    SELECT
-      id,
-      name,
-      password,
-      money,
-      total_rolls,
-      shop_purchases,
-      inventory,
-      placed_aliens
+    SELECT 
+      id, 
+      name, 
+      password, 
+      money, 
+      total_rolls, 
+      shop_purchases, 
+      inventory, 
+      placed_aliens,
+      temporary_luck, 
+      temporary_luck_expires_at
     FROM users
   `);
 
@@ -361,7 +397,9 @@ async function loadDatabaseFromPostgres() {
       total_rolls: Number(row.total_rolls),
       shop_purchases: row.shop_purchases,
       inventory: row.inventory,
-      placed_aliens: row.placed_aliens
+      placed_aliens: row.placed_aliens,
+      temporary_luck: Number(row.temporary_luck),
+      temporary_luck_expires_at: Number(row.temporary_luck_expires_at)
     };
 
     if (!validatePlayer(user)) {
@@ -375,13 +413,23 @@ async function loadDatabaseFromPostgres() {
   }
 }
 
-async function persistDatabase() {
+async function persistDatabase(userIds = Object.keys(database.users)) {
+  if (userIds.length === 0) {
+    return;
+  }
+
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    for (const [id, user] of Object.entries(database.users)) {
+    for (const id of userIds) {
+      const user = database.users[id];
+
+      if (!user) {
+        continue;
+      }
+
       await client.query(
         `
           INSERT INTO users (
@@ -392,9 +440,11 @@ async function persistDatabase() {
             total_rolls,
             shop_purchases,
             inventory,
-            placed_aliens
+            placed_aliens,
+            temporary_luck,
+            temporary_luck_expires_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)
+          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10)
           ON CONFLICT (id)
           DO UPDATE SET
             name = EXCLUDED.name,
@@ -403,7 +453,9 @@ async function persistDatabase() {
             total_rolls = EXCLUDED.total_rolls,
             shop_purchases = EXCLUDED.shop_purchases,
             inventory = EXCLUDED.inventory,
-            placed_aliens = EXCLUDED.placed_aliens
+            placed_aliens = EXCLUDED.placed_aliens,
+            temporary_luck = EXCLUDED.temporary_luck,
+            temporary_luck_expires_at = EXCLUDED.temporary_luck_expires_at
         `,
         [
           id,
@@ -413,7 +465,9 @@ async function persistDatabase() {
           user.total_rolls,
           JSON.stringify(user.shop_purchases),
           JSON.stringify(user.inventory),
-          JSON.stringify(user.placed_aliens)
+          JSON.stringify(user.placed_aliens),
+          Number(user.temporary_luck) || 0,
+          Number(user.temporary_luck_expires_at) || 0
         ]
       );
     }
@@ -427,6 +481,9 @@ async function persistDatabase() {
   }
 }
 
+let databasePersisting = false;
+let databasePersistQueued = false;
+
 function withDatabaseLock(work) {
   return new Promise((resolve, reject) => {
     databaseQueue.push({ work, resolve, reject });
@@ -434,8 +491,36 @@ function withDatabaseLock(work) {
   });
 }
 
+function scheduleDatabasePersist() {
+  if (databasePersistQueued) {
+    return;
+  }
+
+  databasePersistQueued = true;
+
+  queueMicrotask(async () => {
+    databasePersistQueued = false;
+
+    if (databasePersisting) {
+      return;
+    }
+
+    databasePersisting = true;
+
+    try {
+      await persistDatabase();
+    } catch (error) {
+      console.error("Background database persistence failed:", error);
+    } finally {
+      databasePersisting = false;
+    }
+  });
+}
+
 async function drainDatabaseQueue() {
-  if (databaseBusy || databaseQueue.length === 0) return;
+  if (databaseBusy || databaseQueue.length === 0) {
+    return;
+  }
 
   databaseBusy = true;
   const job = databaseQueue.shift();
@@ -443,9 +528,9 @@ async function drainDatabaseQueue() {
   try {
     const result = await job.work();
 
-    await persistDatabase();
-
     job.resolve(result);
+
+    scheduleDatabasePersist();
   } catch (error) {
     job.reject(error);
   } finally {
@@ -638,6 +723,18 @@ function gameStateFor(userId) {
       nextSlotCost: 500 * (2 ** slots),
       moneyPerSecond: totalMoneyPerSecond(player),
       rollAnimationMs: rollAnimationDuration(player),
+      temporaryLuck: {
+        value:
+          Number(player.temporary_luck) > 0 &&
+          Number(player.temporary_luck_expires_at) > Date.now()
+            ? roundFinancial(player.temporary_luck)
+            : 0,
+        expiresAt:
+          Number(player.temporary_luck) > 0 &&
+          Number(player.temporary_luck_expires_at) > Date.now()
+            ? Number(player.temporary_luck_expires_at)
+            : 0
+      },
       upgrades
     },
     catalog: publicCatalog(),
@@ -646,13 +743,26 @@ function gameStateFor(userId) {
 }
 
 function pickAlien(player) {
-  const luck = Math.max(
+  const permanentLuck = Math.max(
     0,
     totalUpgradeBonus(
       "luck_boost",
       player.shop_purchases.luck_boost
     )
   );
+
+  const temporaryLuck =
+    Number(player.temporary_luck) > 0 &&
+    Number(player.temporary_luck_expires_at) > Date.now()
+      ? Number(player.temporary_luck)
+      : 1;
+
+  // Temporary Luck is a true multiplier.
+  // Example:
+  // 0 permanent + 10× temporary = 9 effective Luck
+  // 10% permanent + 10× temporary = 10× the normal luck effect.
+  const luck =
+    (1 + permanentLuck) * ((temporaryLuck - 1) * 0.25);
 
   /*
    * Luck changes the SHAPE of the rarity curve.
@@ -668,10 +778,8 @@ function pickAlien(player) {
    * This intentionally allows extreme endgame Luck to destroy
    * normal progression. That is the reward for reaching it.
    */
-  const rarityExponent = Math.max(
-      0.85,
-      1 / (1 + 0.35 * Math.log10(1 + luck))
-  );
+  const rarityExponent =
+    1 / Math.sqrt(1 + luck * 0.12, 1);
 
   const weights = ALIENS.map((alien) => {
     return Math.pow(alien.rarity, rarityExponent);
@@ -712,7 +820,11 @@ function validatePlayer(player) {
     Number.isInteger(player.shop_purchases.luck_boost) && player.shop_purchases.luck_boost >= 0 &&
     Number.isInteger(player.shop_purchases.rolling_speed) && player.shop_purchases.rolling_speed >= 0 &&
     Number.isInteger(player.shop_purchases.money_increase) && player.shop_purchases.money_increase >= 0 && player.inventory && typeof player.inventory === "object" && !Array.isArray(player.inventory) &&
-    Array.isArray(player.placed_aliens);
+    Array.isArray(player.placed_aliens) &&
+    Number.isFinite(player.temporary_luck) &&
+    player.temporary_luck >= 0 &&
+    Number.isFinite(player.temporary_luck_expires_at) &&
+    player.temporary_luck_expires_at >= 0;
 }
 
 app.disable("x-powered-by");
@@ -745,7 +857,9 @@ app.post("/api/login", requireSameOrigin, async (request, response, next) => {
         total_rolls: 0,
         shop_purchases: { luck_boost: 0, rolling_speed: 0, money_increase: 0 },
         inventory: {},
-        placed_aliens: []
+        placed_aliens: [],
+        temporary_luck: 0,
+        temporary_luck_expires_at: 0
       };
       return { ok: true, userId, created: true };
     });
@@ -815,6 +929,76 @@ app.post("/api/buy-shop", requireSession, requireSameOrigin, async (request, res
     return next(error);
   }
 });
+
+app.post(
+  "/api/buy-temporary-luck",
+  requireSession,
+  requireSameOrigin,
+  async (request, response, next) => {
+    try {
+      const amount = Number(request.body?.amount);
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return response.status(400).json({
+          error: "Enter a valid amount of money."
+        });
+      }
+
+      const spent = roundFinancial(
+        Math.min(TEMPORARY_LUCK_CONFIG.maxMoney, amount)
+      );
+
+      const result = await withDatabaseLock(() => {
+        const player = database.users[request.userId];
+
+        if (!validatePlayer(player)) {
+          throw new Error("Stored player data has an invalid shape.");
+        }
+
+        applyPassiveIncome(player);
+
+        if (player.money + 0.00001 < spent) {
+          return {
+            ok: false,
+            status: 400,
+            error: "Not enough credits."
+          };
+        }
+
+        const luck = temporaryLuckFromMoney(spent);
+        const now = Date.now();
+
+        const currentActive =
+          Number(player.temporary_luck) > 0 &&
+          Number(player.temporary_luck_expires_at) > now;
+
+        if (
+          !currentActive ||
+          luck > Number(player.temporary_luck)
+        ) {
+          player.temporary_luck = luck;
+          player.temporary_luck_expires_at =
+            now + TEMPORARY_LUCK_CONFIG.durationMs;
+        }
+
+        player.money = roundFinancial(player.money - spent);
+
+        return {
+          ok: true,
+          state: gameStateFor(request.userId)
+        };
+      });
+
+      if (!result.ok) {
+        return response.status(result.status).json(result);
+      }
+
+      return response.json(result);
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
 
 app.post("/api/buy-slot", requireSession, requireSameOrigin, async (request, response, next) => {
   try {
