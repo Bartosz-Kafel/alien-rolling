@@ -40,7 +40,7 @@ const SPECIES = [
   "Slime", "Titan", "Voyager", "Mantis", "Oracle", "Warden", "Drifter", "Leviathan", "Sprite", "Monarch",
   "Beast", "Stalker", "Hunter", "Predator", "Scout", "Warrior", "Knight", "Mage", "Sorcerer", "Priest",
   "Shaman", "Druid", "Rogue", "Assassin", "Thief", "Goliath", "Colossus", "Behemoth", "Giant", "Dwarf",
-  "Elf", "Orc", "Goblin", "Troll", "Lurdes", "Dragon", "Wyvern", "Drake", "Hydra", "Phoenix",
+  "Elf", "Orc", "Goblin", "Troll", "Trump", "Dragon", "Wyvern", "Drake", "Hydra", "Phoenix",
   "Gryphon", "Pegasus", "Femboy", "Sphinx", "Minotaur", "Centaur", "Cyclops", "Gooner", "Medusa", "Siren",
   "Mermaid", "Merman", "Kraken", "Cthulhu", "Demon", "Devil", "Angel", "Archangel", "Seraph", "Cherub",
   "Ghost", "Spirit", "Phantom", "Specter", "Wraith", "Apparition", "Shade", "Shadow", "Ghouls", "Zombie",
@@ -148,7 +148,7 @@ function rarityDenominator(index) {
     Math.round(
       2 * Math.pow(
         50_000_000_000_000 / 2,
-        progress ** 0.85
+        progress ** 0.75
       )
     )
   );
@@ -527,7 +527,7 @@ function getSlotCount(player) {
 }
 
 function upgradeCost(level) {
-  return roundFinancial(100 * (1.5 ** level));
+  return roundFinancial(50 * (1.4 ** level));
 }
 
 function nextUpgradeBonus(key, level) {
