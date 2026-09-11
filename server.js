@@ -30,7 +30,7 @@ const PREFIXES = [
   "Delta", "Epsilon", "Zeta", "Sigma", "Matrix", "Vector", "Helix", "Nexus", "Vortex", "Singularity", "Horizon",
   "Infinity", "Eternal", "Ancient", "Primal", "Prismatic", "Spectral", "Radiant", "Luminous", "Glimmer", "Twilight", "Obsidian",
   "Meteor", "Comet", "Asteroid", "Titanium", "Carbon", "Child", "Iron", "Gold", "Quantum", "Nano", "Mega",
-  "Giga", "Tera", "Peta", "Exo", "Endo", "Meso", "Proto", "LGBQT+", "Neo", "Retro", "Future",
+  "Giga", "Black", "Peta", "Exo", "Endo", "Meso", "Proto", "LGBQT+", "Neo", "Retro", "Future",
   "Zenith", "Gay", "Pinnacle", "Abyss", "Lesbian", "Rift", "Anomaly", "Paradox", "Enigma", "Mirage", "Echo",
   "Pulse", "Wave", "Ray", "Beam", "Flash", "Spark", "Blaze", "Frost", "Gale", "Quake", "Flux"
 ];
@@ -46,7 +46,7 @@ const SPECIES = [
   "Ghost", "Spirit", "Phantom", "Specter", "Wraith", "Apparition", "Shade", "Shadow", "Ghouls", "Zombie",
   "Vampire", "Werewolf", "Construct", "Golem", "Robot", "Android", "Cyborg", "Mech", "Machine", "Drone",
   "Automaton", "Engine", "Core", "Matrix", "Network", "Swarm", "Hive", "Sanchez", "Colony", "Nigger",
-  "Herd", "Pack", "Pride", "School", "Pod", "Clan", "Tribe", "Guild", "Order", "Faction"
+  "Herd", "Pack", "Pride", "School", "Dick", "Clan", "Tribe", "Guild", "Order", "Faction"
 ];
 
 // Generates 11,100 unique combinations and takes the first 1,010 (10x your original 101 limit)
@@ -762,7 +762,7 @@ function pickAlien(player) {
   // 0 permanent + 10× temporary = 9 effective Luck
   // 10% permanent + 10× temporary = 10× the normal luck effect.
   const luck =
-    (1 + permanentLuck) * ((temporaryLuck - 1) * 0.125);
+    (1 + permanentLuck) * ((temporaryLuck - 1) * 0.025);
 
   /*
    * Luck changes the SHAPE of the rarity curve.
