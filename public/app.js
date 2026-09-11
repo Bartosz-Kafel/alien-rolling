@@ -630,17 +630,34 @@ async function handleAction(request, successMessage) {
   }
 }
 
-function shuffledRollCandidates(finalAlien, duration) {
-  const options = [...appState.catalog.values()].filter((alien) => alien.id !== finalAlien.id);
-  for (let index = options.length - 1; index > 0; index -= 1) {
-    const randomIndex = Math.floor(Math.random() * (index + 1));
-    [options[index], options[randomIndex]] = [options[randomIndex], options[index]];
-  }
-  const frameCount = Math.min(options.length + 1, Math.max(8, Math.round(duration / 95)));
-  return [...options.slice(0, frameCount - 1), finalAlien];
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function renderReelFrame(alien, finalFrame) {
+function shuffledRollCandidates(finalAlien) {
+  const candidates = [...appState.catalog.values()].filter(
+    (alien) => alien.id !== finalAlien.id
+  );
+
+  // Fisher-Yates shuffle
+  for (let index = candidates.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+
+    [candidates[index], candidates[randomIndex]] = [
+      candidates[randomIndex],
+      candidates[index]
+    ];
+  }
+
+  // Prevent an empty candidate list from breaking the animation.
+  if (candidates.length === 0) {
+    candidates.push(finalAlien);
+  }
+
+  return candidates;
+}
+
+function renderReelFrame(alien, finalFrame = false) {
   elements.alienReel.innerHTML = `
     <div
       class="reel-frame ${finalFrame ? "is-final" : ""}"
@@ -654,7 +671,10 @@ function renderReelFrame(alien, finalFrame) {
 
       <span class="reel-frame-info">
         <b>${escapeHtml(alien.name)}</b>
-        <small>${escapeHtml(alien.tier)} · ${formatRarity(alien.rarityDenominator)}</small>
+        <small>
+          ${escapeHtml(alien.tier)}
+          · ${formatRarity(alien.rarityDenominator)}
+        </small>
       </span>
 
       <em>${finalFrame ? "LOCKED" : "SCANNING"}</em>
@@ -666,41 +686,60 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function wait(milliseconds) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 async function animateAlienReel(finalAlien, duration) {
-  const candidates = shuffledRollCandidates(finalAlien, duration);
+  const startTime = performance.now();
+  const endTime = startTime + duration;
+
+  const candidates = shuffledRollCandidates(finalAlien);
 
   elements.alienReel.classList.add("is-active");
 
-  // Show aliens quickly at first, then slow down near the result.
-  const delays = [
-    55, 65, 75, 90, 110, 135, 165, 205, 260, 340
-  ];
+  let candidateIndex = 0;
 
-  for (let index = 0; index < candidates.length; index += 1) {
-    const isFinal = index === candidates.length - 1;
-    const alien = candidates[index];
+  while (performance.now() < endTime) {
+    const alien = candidates[candidateIndex % candidates.length];
 
-    renderReelFrame(alien, isFinal);
+    renderReelFrame(alien, false);
+    candidateIndex += 1;
 
-    if (isFinal) {
-      // Let the final alien stay visible dramatically.
-      await wait(650);
-    } else {
-      const progress = index / Math.max(1, candidates.length - 1);
-      const delayIndex = Math.min(
-        delays.length - 1,
-        Math.floor(progress * delays.length)
-      );
+    const elapsed = performance.now() - startTime;
+    const progress = Math.min(1, elapsed / duration);
 
-      await wait(delays[delayIndex]);
+    // Fast at the beginning, slower near the end.
+    const delay = Math.round(
+      55 + 285 * Math.pow(progress, 2)
+    );
+
+    const remaining = endTime - performance.now();
+
+    if (remaining <= 0) {
+      break;
     }
+
+    await wait(Math.min(delay, remaining));
   }
 
-  elements.alienReel.classList.remove("is-active");
+  // Make sure the full duration has elapsed.
+  const remaining = endTime - performance.now();
+
+  if (remaining > 0) {
+    await wait(remaining);
+  }
+
+  // Only now reveal the actual server-selected alien.
+  renderReelFrame(finalAlien, true);
+
   elements.alienReel.classList.add("reveal-complete");
 
   await wait(420);
 
+  elements.alienReel.classList.remove("is-active");
   elements.alienReel.classList.remove("reveal-complete");
   elements.alienReel.innerHTML = "";
 }
