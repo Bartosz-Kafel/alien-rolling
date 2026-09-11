@@ -50,14 +50,42 @@ const SPECIES = [
 ];
 
 // Generates 11,100 unique combinations and takes the first 1,010 (10x your original 101 limit)
-const ALIEN_NAMES = [];
+function seededShuffle(items, seed) {
+  const result = [...items];
+  let state = seed >>> 0;
 
-for (let index = 0; index < 1010; index += 1) {
-  const prefix = PREFIXES[index % PREFIXES.length];
-  const code = String(index + 1).padStart(4, "0");
+  function random() {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state;
+  }
 
-  ALIEN_NAMES.push(`${prefix}-${code}`);
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = random() % (index + 1);
+
+    [result[index], result[swapIndex]] = [
+      result[swapIndex],
+      result[index]
+    ];
+  }
+
+  return result;
 }
+
+const uniquePrefixes = [...new Set(PREFIXES)];
+const uniqueSpecies = [...new Set(SPECIES)];
+
+const combinations = [];
+
+for (const prefix of uniquePrefixes) {
+  for (const species of uniqueSpecies) {
+    combinations.push(`${prefix} ${species}`);
+  }
+}
+
+// Always produces the same shuffled order
+const shuffledNames = seededShuffle(combinations, 0xA17E1D);
+
+const ALIEN_NAMES = shuffledNames.slice(0, 1010);
 
 // Expanded by over 10x (165 sci-fi, space, alien, and abstract icons)
 const ALIEN_ICONS = [
