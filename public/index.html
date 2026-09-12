@@ -4,283 +4,52 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0a1128">
-  <meta name="description" content="AFK Alien Dice, an incremental alien-collecting dice game.">
+  <meta name="description" content="AFK Alien Dice, a secure incremental alien-collection game.">
   <title>AFK Alien Dice</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="starfield" aria-hidden="true"></div>
+  <div class="starfield" aria-hidden="true"></div><div id="rollFlash" class="roll-flash" aria-hidden="true"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <div id="loginModal" class="modal is-open" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
-    <form id="loginForm" class="login-card">
-      <p class="eyebrow">SECURE PLAYER LINK</p>
-      <h1 id="loginTitle">AFK <span>ALIEN DICE</span></h1>
-      <p class="login-copy">Collect strange lifeforms. Deploy them. Let the credits roll while you are away.</p>
-      <label for="username">Pilot name</label>
-      <input id="username" name="username" minlength="3" maxlength="24" autocomplete="username" required placeholder="Friend A">
-      <label for="password">Passcode</label>
-      <input id="password" name="password" type="password" minlength="4" maxlength="128" autocomplete="current-password" required placeholder="At least 4 characters">
-      <button class="primary-button" type="submit">Enter the station <span>→</span></button>
-      <p id="loginError" class="form-error" role="alert"></p>
-      <p class="fine-print">New pilot names create an account. Existing names require their passcode.</p>
+    <form id="loginForm" class="game-modal login-card">
+      <p class="eyebrow">SECURE PLAYER LINK</p><h1 id="loginTitle">AFK <span>ALIEN DICE</span></h1>
+      <p class="muted">Roll, collect, merge, and equip odd little lifeforms.</p>
+      <label>Pilot name <input id="username" name="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="Pilot Nova"></label>
+      <label>Passcode <input id="password" name="password" type="password" required minlength="4" maxlength="128" autocomplete="current-password" placeholder="At least 4 characters"></label>
+      <button class="primary-button" type="submit">ENTER THE STATION <span>→</span></button><p id="loginError" class="form-error" role="alert"></p>
+      <p class="fine-print">A new pilot name creates an account. A login from another device closes the old session.</p>
     </form>
   </div>
 
-  <div id="placementModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="placementTitle" aria-hidden="true">
-    <div class="placement-card">
-      <button id="closePlacement" class="icon-button close-button" type="button" aria-label="Close alien selector">×</button>
-      <p class="eyebrow">EMPTY CONTAINER</p>
-      <h2 id="placementTitle">Choose an alien to deploy</h2>
-      <p class="muted">A deployed alien produces credits even while you are away.</p>
-      <div id="placementChoices" class="placement-choices"></div>
-    </div>
-  </div>
-
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="placementModal" class="modal" role="dialog" aria-modal="true" aria-hidden="true"><section class="game-modal wide-modal"><button class="close-button" data-close-modal="placementModal" type="button">×</button><p class="eyebrow">ACTIVE TEAM</p><h2>Deploy a lifeform</h2><p class="muted">Only stored copies can be equipped. Your team generates coins.</p><div id="placementChoices" class="choice-grid"></div></section></div>
+  <div id="sacrificeModal" class="modal" role="dialog" aria-modal="true" aria-hidden="true"><section class="game-modal wide-modal sacrifice-modal"><button class="close-button" data-close-modal="sacrificeModal" type="button">×</button><p class="eyebrow">SINGLE-ROLL LUCK</p><h2>Sacrifice Aliens</h2><p class="muted">This is permanent. Select exact stored quantities to convert them into Luck for the next successful roll.</p><div class="sacrifice-preview"><span>Selected <b id="sacrificeCount">0</b></span><span>Luck gained <b id="sacrificeGain">x0</b></span><span>Next roll <b id="sacrificeNext">x1</b></span></div><div class="sacrifice-tools"><label class="search-control">🔍<input id="sacrificeSearch" type="search" placeholder="Search your stored aliens" autocomplete="off"></label><span id="sacrificeStatus" class="sacrifice-status" aria-live="polite"></span></div><div id="sacrificeChoices" class="choice-grid"></div><button id="sacrificeMoreButton" class="more-button" type="button" hidden>LOAD MORE ALIENS</button><div class="modal-actions"><button id="cancelSacrifice" class="ghost-button" type="button">CANCEL</button><button id="confirmSacrifice" class="primary-button compact-button" type="button">CONFIRM SACRIFICE <span>✦</span></button></div></section></div>
+  <div id="mergeModal" class="modal" role="dialog" aria-modal="true" aria-hidden="true"><section class="game-modal wide-modal"><button class="close-button" data-close-modal="mergeModal" type="button">×</button><p class="eyebrow">SHINY FORGE</p><h2>3 identical aliens → 1 Shiny Alien</h2><p class="muted">Only same permanent alien IDs at the same Plus level are eligible. +++ is the final form.</p><div id="mergePreview" class="merge-preview">Choose an eligible stack below.</div><div id="mergeChoices" class="choice-grid"></div><button id="confirmMerge" class="primary-button compact-button" type="button" disabled>FORGE SHINY <span>✨</span></button></section></div>
+  <div id="settingsModal" class="modal" role="dialog" aria-modal="true" aria-hidden="true"><section class="game-modal settings-modal"><button class="close-button" data-close-modal="settingsModal" type="button">×</button><p class="eyebrow">PILOT SETTINGS</p><h2>Signal controls</h2><button id="animationSetting" class="setting-toggle" type="button"><span>🎲 <b>Rolling animation</b><small>Keep the full dice reveal on</small></span><i></i></button><button id="discoverySetting" class="setting-toggle" type="button"><span>✦ <b>Discovery presentation</b><small>Show first finds full-screen</small></span><i></i></button></section></div>
+  <div id="discoveryModal" class="discovery-modal" aria-hidden="true"><section id="discoveryCard" class="discovery-card"><p>NEW ALIEN DISCOVERED</p><div id="discoveryIcon" class="discovery-icon">👾</div><h2 id="discoveryName">Unknown</h2><strong id="discoveryRarity">MYTHICAL</strong><span id="discoveryChance">1 / 900,040</span><div class="modal-actions"><button id="minimizeDiscovery" class="ghost-button" type="button">MINIMIZE</button><button id="closeDiscovery" class="primary-button compact-button" type="button">ADD TO INDEX <span>✓</span></button></div></section></div>
+  <button id="discoveryMini" class="discovery-mini" type="button" hidden></button>
 
   <main id="app" class="app-shell" aria-hidden="true">
-    <header class="topbar">
-      <div class="brand-mark" aria-label="AFK Alien Dice">AD</div>
-      <div class="player-heading">
-        <span id="pilotName">Pilot</span>
-        <small>ORBITAL COLLECTION UNIT</small>
-      </div>
-      <div class="balance-block">
-        <span class="balance-label">CREDITS</span>
-        <strong id="moneyDisplay">$0.00</strong>
-        <small id="incomeDisplay">+$0.00 / sec</small>
-      </div>
-      <button id="logoutButton" class="icon-button logout-button" type="button" aria-label="Log out">↪</button>
-    </header>
+    <header class="topbar"><button id="headerAvatar" class="brand-mark" type="button" title="Your latest discovery">AD</button><div class="pilot-heading"><strong id="pilotName">Pilot</strong><small>ORBITAL COLLECTION UNIT</small></div><div class="balance-block"><span>COINS</span><strong id="moneyDisplay">0 ◈</strong><small id="incomeDisplay">+0 ◈ / sec</small></div><button id="settingsButton" class="utility-button" type="button" aria-label="Open settings">⚙</button><button id="logoutButton" class="utility-button" type="button" aria-label="Log out">↪</button></header>
 
-    <section id="inventoryView" class="view" aria-labelledby="inventoryHeading">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">HANGAR STORAGE</p>
-          <h2 id="inventoryHeading">Inventory</h2>
-        </div>
-        <span id="inventoryCount" class="stat-chip">0 aliens</span>
-      </div>
-      <p class="section-copy">Duplicate rolls stack automatically. Send an alien into the field whenever a container is open.</p>
-      <div id="inventoryGrid" class="alien-grid"></div>
-    </section>
-
-    <section id="aliensView" class="view" aria-labelledby="aliensHeading" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">PASSIVE GENERATORS</p>
-          <h2 id="aliensHeading">Alien containers</h2>
-        </div>
-        <span id="slotCount" class="stat-chip">1 slot</span>
-      </div>
-      <p class="section-copy">Every occupied container pays its displayed rate into your account on the server.</p>
-      <div id="slotGrid" class="slot-grid"></div>
-    </section>
-
-    <section id="shopView" class="view" aria-labelledby="shopHeading" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">STATION RESEARCH</p>
-          <h2 id="shopHeading">Upgrade shop</h2>
-        </div>
-        <span class="stat-chip">Base price $50</span>
-      </div>
-      <p class="section-copy">Each next price is exactly 50 × 1.4<sup>level</sup>. Each purchased bonus is base bonus × 1.1<sup>level</sup>.</p>
-      <div id="shopGrid" class="shop-grid"></div>
-
-        <div class="temporary-luck-shop-card">
-          <div class="shop-icon">🍀</div>
-
-          <div>
-            <p class="eyebrow">TEMPORARY BOOST</p>
-            <h3>Luck Boost</h3>
-            <p>
-              Spend money to activate a stronger luck boost for exactly 60 seconds.
-              Higher spending gives stronger luck.
-            </p>
-          </div>
-
-          <div class="temporary-luck-controls">
-            <label for="temporaryLuckMoney">Money to spend</label>
-
-            <input
-              id="temporaryLuckMoney"
-              type="number"
-              min="1"
-              max="1000000000000000"
-              step="1"
-              value="10000"
-              inputmode="numeric"
-            />
-
-            <div class="temporary-luck-preview">
-              <span>Luck</span>
-              <strong id="temporaryLuckPreview">2×</strong>
-            </div>
-
-            <div class="temporary-luck-duration">
-              <span>Duration</span>
-              <strong>60 seconds</strong>
-            </div>
-
-            <button
-              id="temporaryLuckActivateButton"
-              class="shop-button"
-              type="button"
-            >
-              Activate
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section id="tradingView" class="view" aria-labelledby="tradingHeading" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">PILOT EXCHANGE</p>
-          <h2 id="tradingHeading">Trading</h2>
-        </div>
-        <span class="stat-chip">ALIEN TRANSFER</span>
-      </div>
-
-      <p class="section-copy">Send one alien from your inventory to another pilot.</p>
-
-      <div class="trade-panel">
-        <label for="tradeRecipient">Recipient pilot</label>
-        <input
-          id="tradeRecipient"
-          type="text"
-          maxlength="24"
-          autocomplete="off"
-          placeholder="Pilot name"
-        >
-
-        <div class="trade-selection" id="tradeAlienSelection">
-          <div class="empty-state">
-            <strong>No alien selected.</strong>
-            <p>Choose an alien from your inventory below.</p>
-          </div>
-        </div>
-
-        <div class="trade-quantity-row">
-          <label for="tradeQuantity">Amount to send</label>
-
-          <div class="trade-quantity-input">
-            <input
-              id="tradeQuantity"
-              type="number"
-              min="1"
-              value="1"
-              disabled
-            >
-            <span id="tradeQuantityMax">/ 0</span>
-          </div>
-        </div>
-
-        <button id="tradeSendButton" class="primary-button" type="button" disabled>
-          Send alien <span>→</span>
-        </button>
-      </div>
-
-      <div class="section-heading trade-inventory-heading">
-        <div>
-          <p class="eyebrow">AVAILABLE LIFEFORMS</p>
-          <h3>Choose an alien</h3>
-        </div>
-      </div>
-
-      <div id="tradeInventoryGrid" class="trade-inventory-grid"></div>
-    </section>
-
-    <section id="rollingView" class="view rolling-view" aria-labelledby="rollingHeading" hidden>
-      <div class="rolling-layout">
-        <aside class="temporary-luck-status" aria-label="Temporary luck boost">
-          <div class="temporary-luck-status-icon">🍀</div>
-
-          <div class="temporary-luck-status-content">
-            <p class="eyebrow">LUCK BOOST</p>
-            <strong id="temporaryLuckStatusValue">Not active</strong>
-            <span id="temporaryLuckStatusTimer">Activate in Shop</span>
-          </div>
-        </aside>
-
-        <div class="rolling-main">
-          <div class="section-heading centered-heading">
-            <div>
-              <p class="eyebrow">QUANTUM ROLL CORE</p>
-              <h2 id="rollingHeading">Roll for an alien</h2>
-            </div>
-          </div>
-
-          <p id="rollHint" class="section-copy centered-copy">
-            Tap the dice to materialize a new alien. Rolls are free.
-          </p>
-
-          <button
-            id="rollButton"
-            class="dice-button"
-            type="button"
-            aria-label="Roll the dice"
-          >
-            <span class="dice-shadow" aria-hidden="true"></span>
-
-            <span id="dice" class="dice" aria-hidden="true">
-              <span class="dice-face face-front"><i></i><i></i><i></i><i></i><i></i></span>
-              <span class="dice-face face-back"><i></i><i></i><i></i><i></i></span>
-              <span class="dice-face face-right"><i></i><i></i><i></i></span>
-              <span class="dice-face face-left"><i></i><i></i><i></i></span>
-              <span class="dice-face face-top"><i></i><i></i></span>
-              <span class="dice-face face-bottom"><i></i><i></i><i></i><i></i><i></i><i></i></span>
-            </span>
-          </button>
-
-          <p class="dice-caption">
-            CLICK TO ROLL
-            <span>◆</span>
-            <span id="cooldownDisplay">READY</span>
-          </p>
-
-          <div
-            id="alienReel"
-            class="alien-reel"
-            aria-live="polite"
-            aria-label="Possible alien roll sequence"
-          ></div>
-
-          <div
-            id="rollResult"
-            class="roll-result"
-            aria-live="polite"
-          ></div>
-        </div>
+    <section id="rollingView" class="view rolling-view" aria-labelledby="rollingHeading">
+      <div class="rolling-layout"><aside class="orbit-side luck-meter"><span>🍀</span><small>ACTIVE LUCK</small><strong id="luckValue">x1</strong><em id="pendingLuck">No pending boost</em></aside>
+        <div id="rollingMain" class="rolling-main"><div id="rollFx" class="roll-fx" aria-hidden="true"></div><p class="eyebrow">QUANTUM ROLL CORE</p><h1 id="rollingHeading">Roll for an alien</h1><p id="rollHint" class="muted">Server-authorized signal · every die resolves independently.</p><button id="rollButton" class="dice-button" type="button" aria-label="Roll the dice"><span class="dice-shadow"></span><span id="dice" class="dice"><span class="dice-face face-front"><i></i><i></i><i></i><i></i><i></i></span><span class="dice-face face-back"><i></i><i></i><i></i><i></i></span><span class="dice-face face-right"><i></i><i></i><i></i></span><span class="dice-face face-left"><i></i><i></i><i></i></span><span class="dice-face face-top"><i></i></span><span class="dice-face face-bottom"><i></i><i></i><i></i><i></i><i></i><i></i></span></span></button><p class="dice-caption">TAP TO ROLL <b id="diceCount">1 DIE</b></p>
+          <div id="resultBox" class="result-box" aria-live="polite"><div class="signal-previous"><small>LEAVING</small><b id="previousResult">—</b></div><div class="signal-core"><span id="resultIcon">🎲</span><div><small id="resultState">READY</small><h2 id="resultName">Awaiting signal</h2><p id="resultInfo">The reveal lands here.</p></div></div><div class="signal-next"><small>APPROACHING</small><b id="nextResult">???</b></div></div>
+        </div><aside class="orbit-side auto-meter"><button id="autoRollButton" class="auto-button" type="button"><span>🔁</span><b id="autoRollLabel">AUTO ROLL</b><small>OFF · −20% income while active</small></button></aside>
       </div>
     </section>
 
-    <section id="leaderboardView" class="view" aria-labelledby="leaderboardHeading" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">STATION-WIDE SIGNAL</p>
-          <h2 id="leaderboardHeading">Leaderboard</h2>
-        </div>
-        <span id="rankBadge" class="stat-chip">Rank —</span>
-      </div>
-      <p class="section-copy">The ten wealthiest pilots are shown. Your true rank always follows if it is outside the top ten.</p>
-      <div class="leaderboard-table" role="table" aria-label="Top pilots">
-        <div class="table-head" role="row"><span>RANK</span><span>PILOT</span><span>CREDITS</span><span>ROLLS</span></div>
-        <div id="leaderboardRows"></div>
-      </div>
-    </section>
+    <section id="inventoryView" class="view" hidden><div class="section-heading"><div><p class="eyebrow">COLLECTION &amp; ACTIVE TEAM</p><h2>Inventory</h2></div><span id="inventoryCount" class="stat-chip">0 stored</span></div><div class="utility-bar"><label class="search-control">🔍<input id="inventorySearch" type="search" placeholder="Search stored aliens" autocomplete="off"></label><button id="mergeButton" class="mini-utility" type="button" title="Shiny merge">✨ <span>SHINY</span></button><button id="equipBestButton" class="mini-utility" type="button">⚡ <span>EQUIP BEST</span></button></div><section class="team-panel"><div class="section-heading compact-heading"><div><p class="eyebrow">PASSIVE GENERATORS</p><h3>Active team</h3></div><span id="teamIncome" class="stat-chip">+0 ◈ / sec</span></div><div id="teamGrid" class="team-grid"></div></section><div id="inventoryGrid" class="alien-grid"></div><button id="inventoryMoreButton" class="more-button" type="button" hidden>LOAD MORE</button></section>
+
+    <section id="shopView" class="view" hidden><div class="section-heading"><div><p class="eyebrow">STATION RESEARCH</p><h2>Upgrade shop</h2></div><span class="stat-chip">5 systems</span></div><p class="section-copy">Every price and benefit is calculated on the server. Luck bends rarity weights with diminishing returns; it never changes an Alien’s base chance.</p><div id="shopGrid" class="shop-grid"></div><article class="shop-card sacrifice-card"><div class="shop-icon">🜁</div><div><p class="eyebrow">NEXT ROLL ONLY</p><h3>Single-Roll Luck</h3><p>Consume selected inventory aliens for a temporary, server-verified boost.</p></div><button id="openSacrifice" class="primary-button compact-button" type="button">SACRIFICE ALIENS <span>→</span></button></article></section>
+
+    <section id="ranksView" class="view" hidden><div class="section-heading"><div><p class="eyebrow">THE GREAT INDEX</p><h2>Ranks &amp; progression</h2></div><span id="rankBadge" class="stat-chip">Rank —</span></div><div id="progressStats" class="progress-stats"></div><div class="section-heading compact-heading"><div><p class="eyebrow">10,000 PERMANENT SIGNALS</p><h3>Alien Index</h3></div><span id="indexProgress" class="stat-chip">0 / 10,000</span></div><div class="utility-bar"><label class="search-control">🔍<input id="catalogSearch" type="search" placeholder="Search the Alien Index" autocomplete="off"></label></div><div id="catalogGrid" class="index-grid"></div><button id="catalogMoreButton" class="more-button" type="button" hidden>LOAD MORE SIGNALS</button><section class="ranks-panel"><p class="eyebrow">STATION RANKS</p><div id="rankRows" class="rank-rows"></div></section></section>
+
+    <section id="tradingView" class="view" hidden><div class="section-heading"><div><p class="eyebrow">SECURE PILOT EXCHANGE</p><h2>Trade terminal</h2></div><span class="stat-chip">2 confirmations</span></div><p class="section-copy">Choose an exact Alien stack and quantity. Both sides are validated again just before the server settles the exchange.</p><div class="trade-create"><input id="tradeRecipient" type="text" maxlength="24" placeholder="Pilot name"><button id="tradeInvite" class="primary-button compact-button" type="button">INVITE <span>→</span></button></div><div id="tradeRooms" class="trade-rooms"></div><div id="tradeControls" class="trade-controls" hidden><h3 id="tradePartner">Trade</h3><div id="tradeChoices" class="choice-grid"></div><div class="quantity-stepper"><button id="tradeMinus" type="button">−</button><b id="tradeQuantity">1</b><button id="tradePlus" type="button">+</button></div><button id="tradeOffer" class="ghost-button" type="button">UPDATE OFFER</button><button id="tradeConfirm" class="primary-button compact-button" type="button">CONFIRM EXCHANGE <span>✓</span></button></div></section>
   </main>
-
-  <nav class="bottom-nav" aria-label="Game navigation">
-    <button class="nav-tab" type="button" data-view="inventory" aria-label="Inventory"><span><b>▣</b>Inventory</span></button>
-    <button class="nav-tab" type="button" data-view="aliens" aria-label="Aliens"><span><b>☄</b>Aliens</span></button>
-    <button class="nav-tab" type="button" data-view="shop" aria-label="Shop"><span><b>✦</b>Shop</span></button>
-    <button class="nav-tab" type="button" data-view="trading" aria-label="Trading"><span><b>⇄</b>Trade</span></button>
-    <button class="nav-tab is-active" type="button" data-view="rolling" aria-label="Rolling"><span><b>⚄</b>Rolling</span></button>
-    <button class="nav-tab" type="button" data-view="leaderboard" aria-label="Leaderboard"><span><b>♜</b>Ranks</span></button>
-  </nav>
-
-  <script src="/app.js" defer></script>
+  <nav class="bottom-nav" aria-label="Game navigation"><button class="nav-tab" data-view="inventory" type="button"><span>▣<small>Inventory</small></span></button><button class="nav-tab" data-view="shop" type="button"><span>✦<small>Shop</small></span></button><button class="nav-tab is-active" data-view="rolling" type="button"><span>⚄<small>Roll</small></span></button><button class="nav-tab" data-view="ranks" type="button"><span>◎<small>Ranks</small></span></button><button class="nav-tab" data-view="trading" type="button"><span>⇄<small>Trade</small></span></button></nav>
+  <script src="/numbers.js" defer></script><script src="/sounds.js" defer></script><script src="/app.js" defer></script>
 </body>
 </html>

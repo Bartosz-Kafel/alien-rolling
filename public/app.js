@@ -1,1197 +1,233 @@
-// ================================
-// AFK ALIEN DICE - SOUND ENGINE
-// ================================
-
-let audioCtx = null;
-
-function getAudioContext() {
-    if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-
-    if (audioCtx.state === "suspended") {
-        audioCtx.resume();
-    }
-
-    return audioCtx;
-}
-
-function tone({
-    frequency = 440,
-    endFrequency = frequency,
-    duration = 0.2,
-    volume = 0.12,
-    type = "sine",
-    delay = 0
-}) {
-    const ctx = getAudioContext();
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    const start = ctx.currentTime + delay;
-    const end = start + duration;
-
-    osc.type = type;
-
-    osc.frequency.setValueAtTime(frequency, start);
-
-    if (endFrequency !== frequency) {
-        osc.frequency.exponentialRampToValueAtTime(
-            Math.max(20, endFrequency),
-            end
-        );
-    }
-
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(volume, start + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, end);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start(start);
-    osc.stop(end + 0.02);
-}
-
-function playRollSound() {
-    tone({
-        frequency: 120,
-        endFrequency: 500,
-        duration: 2,
-        volume: 0.10,
-        type: "sine"
-    });
-
-    tone({
-        frequency: 250,
-        endFrequency: 900,
-        duration: 0.18,
-        volume: 0.045,
-        type: "triangle",
-        delay: 0.08
-    });
-}
-
-
-function playRevealSound() {
-    tone({
-        frequency: 180,
-        endFrequency: 700,
-        duration: 0.45,
-        volume: 0.10,
-        type: "sine"
-    });
-
-    tone({
-        frequency: 600,
-        endFrequency: 1100,
-        duration: 0.35,
-        volume: 0.055,
-        type: "triangle",
-        delay: 0.18
-    });
-}
-
-
-function playDiscoverySound() {
-    tone({
-        frequency: 180,
-        endFrequency: 450,
-        duration: 0.35,
-        volume: 0.12,
-        type: "sine"
-    });
-
-    tone({
-        frequency: 450,
-        endFrequency: 900,
-        duration: 0.45,
-        volume: 0.10,
-        type: "triangle",
-        delay: 0.22
-    });
-
-    tone({
-        frequency: 900,
-        endFrequency: 1400,
-        duration: 0.55,
-        volume: 0.065,
-        type: "sine",
-        delay: 0.38
-    });
-}
-
-
-function playPurchaseSound() {
-    tone({
-        frequency: 500,
-        duration: 0.12,
-        volume: 0.08,
-        type: "triangle"
-    });
-
-    tone({
-        frequency: 750,
-        duration: 0.18,
-        volume: 0.07,
-        type: "triangle",
-        delay: 0.09
-    });
-}
-
-
-function playTradeSound() {
-    tone({
-        frequency: 350,
-        endFrequency: 600,
-        duration: 0.20,
-        volume: 0.07,
-        type: "sine"
-    });
-
-    tone({
-        frequency: 600,
-        endFrequency: 900,
-        duration: 0.25,
-        volume: 0.06,
-        type: "triangle",
-        delay: 0.16
-    });
-}
-
-
-function playErrorSound() {
-    tone({
-        frequency: 180,
-        endFrequency: 100,
-        duration: 0.20,
-        volume: 0.09,
-        type: "sawtooth"
-    });
-}
-
-
-function playClickSound() {
-    tone({
-        frequency: 700,
-        endFrequency: 500,
-        duration: 0.06,
-        volume: 0.035,
-        type: "sine"
-    });
-}
+"use strict";
 
 const $ = (selector) => document.querySelector(selector);
-const elements = {
-  app: $("#app"),
-  loginModal: $("#loginModal"),
-  loginForm: $("#loginForm"),
-  loginError: $("#loginError"),
-  placementModal: $("#placementModal"),
-  placementChoices: $("#placementChoices"),
-  closePlacement: $("#closePlacement"),
-  toast: $("#toast"),
-  pilotName: $("#pilotName"),
-  money: $("#moneyDisplay"),
-  income: $("#incomeDisplay"),
-  inventoryCount: $("#inventoryCount"),
-  inventoryGrid: $("#inventoryGrid"),
-  slotCount: $("#slotCount"),
-  slotGrid: $("#slotGrid"),
-  shopGrid: $("#shopGrid"),
-  tradeRecipient: $("#tradeRecipient"),
-  tradeAlienSelection: $("#tradeAlienSelection"),
-  tradeSendButton: $("#tradeSendButton"),
-  tradeInventoryGrid: $("#tradeInventoryGrid"),
-  tradeQuantity: $("#tradeQuantity"),
-  tradeQuantityMax: $("#tradeQuantityMax"),
-  rankBadge: $("#rankBadge"),
-  leaderboardRows: $("#leaderboardRows"),
-  dice: $("#dice"),
-  rollButton: $("#rollButton"),
-  alienReel: $("#alienReel"),
-  rollResult: $("#rollResult"),
-  rollHint: $("#rollHint"),
-  cooldown: $("#cooldownDisplay"),
-  logoutButton: $("#logoutButton"),
-  temporaryLuckMoney: $("#temporaryLuckMoney"),
-  temporaryLuckPreview: $("#temporaryLuckPreview"),
-  temporaryLuckActivateButton: $("#temporaryLuckActivateButton"),
-  temporaryLuckStatus: $(".temporary-luck-status"),
-  temporaryLuckStatusValue: $("#temporaryLuckStatusValue"),
-  temporaryLuckStatusTimer: $("#temporaryLuckStatusTimer")
+const dom = Object.fromEntries([
+  "app", "loginModal", "loginForm", "loginError", "username", "password", "toast", "pilotName", "headerAvatar", "moneyDisplay", "incomeDisplay", "settingsButton", "logoutButton",
+  "rollingMain", "rollFx", "rollFlash", "rollButton", "dice", "luckValue", "pendingLuck", "diceCount", "rollHint", "resultBox", "resultIcon", "resultState", "resultName", "resultInfo", "previousResult", "nextResult", "autoRollButton", "autoRollLabel",
+  "inventorySearch", "inventoryCount", "teamIncome", "teamGrid", "inventoryGrid", "inventoryMoreButton", "mergeButton", "equipBestButton", "placementModal", "placementChoices", "shopGrid",
+  "openSacrifice", "sacrificeModal", "sacrificeChoices", "sacrificeCount", "sacrificeGain", "sacrificeNext", "sacrificeSearch", "sacrificeStatus", "sacrificeMoreButton", "cancelSacrifice", "confirmSacrifice",
+  "mergeModal", "mergeChoices", "mergePreview", "confirmMerge", "settingsModal", "animationSetting", "discoverySetting", "discoveryModal", "discoveryCard", "discoveryIcon", "discoveryName", "discoveryRarity", "discoveryChance", "minimizeDiscovery", "closeDiscovery", "discoveryMini",
+  "rankBadge", "progressStats", "indexProgress", "catalogSearch", "catalogGrid", "catalogMoreButton", "rankRows",
+  "tradeRecipient", "tradeInvite", "tradeRooms", "tradeControls", "tradePartner", "tradeChoices", "tradeMinus", "tradePlus", "tradeQuantity", "tradeOffer", "tradeConfirm"
+].map((id) => [id, $("#" + id)]));
+const N = window.gameNumbers;
+const state = {
+  game: null, csrfToken: "", activeView: "rolling", rolling: false, estimatedMoney: 0, lastMoneyTick: performance.now(), toastTimer: null, autoTimer: null, syncBusy: false, rollFxGeneration: 0,
+  inventory: { entries: [], nextOffset: null, totalCopies: 0, totalStacks: 0, loading: false, search: "" },
+  catalog: { entries: [], nextOffset: null, total: 0, loading: false, search: "" }, ranks: null, placementSlot: null, sacrifice: new Map(), sacrificeInventory: { entries: [], nextOffset: 0, totalStacks: 0, loading: false, search: "" }, sacrificeSubmitting: false, merge: null, lastResult: null,
+  trades: [], selectedTrade: null, tradeStack: null, tradeQuantity: 1
 };
+const RARITIES = ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical", "Celestial", "Cosmic", "Transcendent", "Paradox"];
 
-
-const appState = {
-  game: null,
-  catalog: new Map(),
-  activeView: "rolling",
-  estimatedMoney: 0,
-  lastClientTick: performance.now(),
-  rolling: false,
-  placementSlot: null,
-  tradeAlienId: null,
-  tradeQuantity: 1,
-  syncInFlight: false,
-  toastTimer: null
-};
-
-const SHOP_ICONS = { luck_boost: "☘", rolling_speed: "⚡", money_increase: "✹" };
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
-  }[character]));
-}
-
-function formatMoney(value) {
-  const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
-  return `$${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatRate(value) {
-  const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
-  if (safe >= 1_000_000_000) return `$${(safe / 1_000_000_000).toFixed(2)}B`;
-  if (safe >= 1_000_000) return `$${(safe / 1_000_000).toFixed(2)}M`;
-  if (safe >= 1_000) return `$${(safe / 1_000).toFixed(2)}K`;
-  return `$${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatRarity(denominator) {
-  const value = Number(denominator);
-
-  if (!Number.isFinite(value) || value <= 0) {
-    return "1 / ?";
-  }
-
-  if (value >= 1_000_000_000_000) {
-    return `1 / ${(value / 1_000_000_000_000).toFixed(1)}T`;
-  }
-
-  if (value >= 1_000_000_000) {
-    return `1 / ${(value / 1_000_000_000).toFixed(1)}B`;
-  }
-
-  if (value >= 1_000_000) {
-    return `1 / ${(value / 1_000_000).toFixed(1)}M`;
-  }
-
-  if (value >= 1_000) {
-    return `1 / ${(value / 1_000).toFixed(1)}K`;
-  }
-
-  return `1 / ${Math.round(value).toLocaleString()}`;
-}
-
-function formatPercent(fraction) {
-  const percent = Math.max(0, Number(fraction) || 0) * 100;
-  if (percent >= 1) return `${percent.toFixed(2)}%`;
-  if (percent >= 0.01) return `${percent.toFixed(4)}%`;
-  return `${percent.toFixed(6)}%`;
-}
-
-function formatBonus(key, amount) {
-  const percentage = `${(amount * 100).toFixed(2)}%`;
-  if (key === "luck_boost") return `${percentage} rare-roll bias`;
-  if (key === "rolling_speed") return `${percentage} shorter roll animation`;
-  return `${percentage} alien income`;
-}
-
-function temporaryLuckFromMoney(amount) {
-  const money = Math.max(0, Number(amount) || 0);
-
-  if (money <= 0) {
-    return 0;
-  }
-
-  if (money <= 1_000_000) {
-    return 10 * Math.pow(money / 1_000_000, 0.35);
-  }
-
-  return 10 * Math.pow(money / 1_000_000, 0.27);
-}
-
-function formatTemporaryLuck(value) {
-  const luck = Number(value) || 0;
-
-  if (luck <= 0) {
-    return "0×";
-  }
-
-  if (luck >= 100) {
-    return `${luck.toFixed(0)}×`;
-  }
-
-  if (luck >= 10) {
-    return `${luck.toFixed(1)}×`;
-  }
-
-  return `${luck.toFixed(2)}×`;
-}
-
-function updateTemporaryLuckPreview() {
-  if (!elements.temporaryLuckMoney || !elements.temporaryLuckPreview) {
-    return;
-  }
-
-  const luck = temporaryLuckFromMoney(
-    elements.temporaryLuckMoney.value
-  );
-
-  elements.temporaryLuckPreview.textContent =
-    formatTemporaryLuck(luck);
-}
-
-function showToast(message, type = "normal") {
-  clearTimeout(appState.toastTimer);
-  elements.toast.textContent = message;
-  elements.toast.className = `toast show${type === "error" ? " error" : ""}`;
-  appState.toastTimer = setTimeout(() => { elements.toast.className = "toast"; }, 3600);
-}
+function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
+function requestId() { return crypto.randomUUID(); }
+function showToast(message, type = "normal") { clearTimeout(state.toastTimer); dom.toast.textContent = message; dom.toast.className = `toast show ${type}`; state.toastTimer = setTimeout(() => { dom.toast.className = "toast"; }, 3400); }
+function openModal(element) { element.classList.add("is-open"); element.setAttribute("aria-hidden", "false"); playSound("menu"); }
+function closeModal(element) { element.classList.remove("is-open"); element.setAttribute("aria-hidden", "true"); }
+function player() { return state.game?.player; }
+function plusLabel(level) { return "+".repeat(Number(level) || 0); }
+function currentResultTitle() { return state.lastResult?.name || "—"; }
 
 async function api(path, options = {}) {
-  const requestOptions = { credentials: "same-origin", ...options };
-  if (requestOptions.body) requestOptions.headers = { "Content-Type": "application/json", ...(requestOptions.headers || {}) };
-  const response = await fetch(path, requestOptions);
-  const text = await response.text();
-  let payload = {};
-  try { payload = text ? JSON.parse(text) : {}; } catch { payload = { error: "The server returned an unreadable response." }; }
-  if (!response.ok) {
-    const error = new Error(payload.error || "Request failed.");
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
+  const headers = { ...(options.headers || {}) };
+  if (options.body) headers["Content-Type"] = "application/json";
+  if (state.csrfToken) headers["X-CSRF-Token"] = state.csrfToken;
+  const response = await fetch(path, { credentials: "same-origin", ...options, headers });
+  const raw = await response.text(); let payload = {};
+  try { payload = raw ? JSON.parse(raw) : {}; } catch { payload = { error: "The station sent an unreadable response." }; }
+  if (!response.ok) { const error = new Error(payload.error || "Request failed."); error.status = response.status; error.payload = payload; throw error; }
   return payload;
 }
-
 function acceptGameState(payload) {
-  const game = payload.state || payload;
-  if (!game || !game.player || !Array.isArray(game.catalog)) return false;
-  appState.game = game;
-  appState.catalog = new Map(game.catalog.map((alien) => [alien.id, alien]));
-  appState.estimatedMoney = Number(game.player.money) || 0;
-  appState.lastClientTick = performance.now();
-  renderAll();
-  return true;
+  const game = payload?.state || payload;
+  if (!game?.player) return false;
+  state.game = game; if (typeof payload.csrfToken === "string") state.csrfToken = payload.csrfToken;
+  state.estimatedMoney = Number(game.player.money) || 0; state.lastMoneyTick = performance.now();
+  renderShell(); scheduleAutoRoll(); return true;
 }
-
-function currentPlayer() {
-  return appState.game?.player || null;
-}
-
-function inventoryEntries() {
-  const inventory = currentPlayer()?.inventory || {};
-  return Object.entries(inventory)
-    .map(([id, count]) => ({ alien: appState.catalog.get(id), count: Number(count) || 0 }))
-    .filter(({ alien, count }) => alien && count > 0)
-    .sort((a, b) => b.alien.money_per_sec - a.alien.money_per_sec);
-}
-
-function firstEmptySlot() {
-  const placed = currentPlayer()?.placed_aliens || [];
-  return placed.findIndex((alien) => !alien);
-}
-
-function priceClass(cost) {
-  return appState.estimatedMoney + 0.00001 >= cost ? "affordable" : "unaffordable";
-}
-
-function alienCard(alien, count = null, action = "") {
-  return `
-    <article class="alien-card" style="--alien-color:${escapeHtml(alien.color)}">
-      ${count !== null ? `<span class="count-badge" aria-label="${count} copies">×${count}</span>` : ""}
-      <div class="alien-card-top">
-        <div class="alien-portrait" aria-hidden="true">${escapeHtml(alien.icon)}</div>
-        <div><h3 class="alien-name">${escapeHtml(alien.name)}</h3><span class="tier-label">${escapeHtml(alien.tier)}</span></div>
-      </div>
-      <p class="alien-rate">${formatRate(alien.money_per_sec)} <small>/ sec</small></p>
-      <p class="rarity-line">Rarity: <b>${formatRarity(alien.rarityDenominator)}</b></p>
-      ${action}
-    </article>`;
-}
-
-function renderHeader() {
-  const player = currentPlayer();
-  if (!player) return;
-  elements.pilotName.textContent = player.name;
-  elements.money.textContent = formatMoney(appState.estimatedMoney);
-  elements.income.textContent = `+${formatRate(player.moneyPerSecond)} / sec`;
-}
-
-function renderInventory() {
-  const entries = inventoryEntries();
-  const count = entries.reduce((sum, entry) => sum + entry.count, 0);
-  elements.inventoryCount.textContent = `${count} alien${count === 1 ? "" : "s"}`;
-  if (!entries.length) {
-    elements.inventoryGrid.innerHTML = `<div class="empty-state"><strong>Your hangar is empty.</strong><p>Roll the dice core to discover your first alien.</p></div>`;
-    return;
-  }
-  elements.inventoryGrid.innerHTML = entries.map(({ alien, count }) => alienCard(
-    alien,
-    count,
-    `<button class="card-action" type="button" data-deploy="${escapeHtml(alien.id)}">DEPLOY TO EMPTY SLOT</button>`
-  )).join("");
-}
-
-function renderSlots() {
-  const player = currentPlayer();
-  if (!player) return;
-  const canDeploy = inventoryEntries().length > 0;
-  elements.slotCount.textContent = `${player.slots} container${player.slots === 1 ? "" : "s"}`;
-  const cards = player.placed_aliens.map((alien, index) => {
-    if (alien) return `<div class="slot-card"><span class="slot-index">CONTAINER ${String(index + 1).padStart(2, "0")}</span>${alienCard(alien, null, `<button class="card-action" type="button" data-recall-slot="${index}">RECALL TO INVENTORY</button>`)}</div>`;
-    return `<div class="slot-card"><span class="slot-index">CONTAINER ${String(index + 1).padStart(2, "0")}</span><div class="empty-slot"><div><div class="open-container" aria-hidden="true"></div><p>Awaiting a lifeform</p></div><button type="button" data-empty-slot="${index}" ${canDeploy ? "" : "disabled"}>CHOOSE ALIEN</button></div></div>`;
-  });
-  const affordable = priceClass(player.nextSlotCost) === "affordable";
-  cards.push(`<button class="slot-purchase" type="button" data-buy-slot data-cost="${player.nextSlotCost}" ${affordable ? "" : "disabled"}><span class="plus">+</span><strong>UNLOCK BOX</strong><small class="price ${priceClass(player.nextSlotCost)}">${formatMoney(player.nextSlotCost)}</small></button>`);
-  elements.slotGrid.innerHTML = cards.join("");
-}
-
-function renderShop() {
-  const player = currentPlayer();
-  if (!player) return;
-  const upgrades = Object.entries(player.upgrades);
-  elements.shopGrid.innerHTML = upgrades.map(([key, upgrade]) => {
-    const affordable = priceClass(upgrade.cost) === "affordable";
-    return `
-      <article class="shop-card">
-        <div class="shop-icon" aria-hidden="true">${SHOP_ICONS[key]}</div>
-        <h3>${escapeHtml(upgrade.label)}</h3>
-        <p>${escapeHtml(upgrade.description)}</p>
-        <div class="level-line">LEVEL ${upgrade.level}</div>
-        <div class="bonus-line">Next: ${formatBonus(key, upgrade.nextBonus)}</div>
-        <button class="shop-button" type="button" data-buy-upgrade="${key}" data-cost="${upgrade.cost}" ${affordable ? "" : "disabled"}>BUY <span class="price ${priceClass(upgrade.cost)}">${formatMoney(upgrade.cost)}</span></button>
-      </article>`;
-  }).join("");
-}
-
-function renderTrading() {
-  const entries = inventoryEntries();
-
-  if (!entries.length) {
-    elements.tradeInventoryGrid.innerHTML = `
-      <div class="empty-state">
-        <strong>Your hangar is empty.</strong>
-        <p>Roll an alien before trying to trade.</p>
-      </div>`;
-
-    elements.tradeAlienSelection.innerHTML = `
-      <div class="empty-state">
-        <strong>No alien selected.</strong>
-        <p>Your inventory is empty.</p>
-      </div>`;
-
-    elements.tradeSendButton.disabled = true;
-
-    if (elements.tradeQuantity) {
-      elements.tradeQuantity.disabled = true;
-      elements.tradeQuantity.value = 1;
-    }
-
-    if (elements.tradeQuantityMax) {
-      elements.tradeQuantityMax.textContent = "/ 0";
-    }
-
-    return;
-  }
-
-  elements.tradeInventoryGrid.innerHTML = entries.map(({ alien, count }) => `
-    <button
-      class="trade-alien-card ${appState.tradeAlienId === alien.id ? "is-selected" : ""}"
-      type="button"
-      data-trade-alien="${escapeHtml(alien.id)}"
-      style="--alien-color:${escapeHtml(alien.color)}"
-    >
-      <div class="alien-portrait" aria-hidden="true">${escapeHtml(alien.icon)}</div>
-      <div>
-        <strong>${escapeHtml(alien.name)}</strong>
-        <span>${escapeHtml(alien.tier)}</span>
-        <small>×${count} · ${formatRate(alien.money_per_sec)} / sec</small>
-      </div>
-    </button>
-  `).join("");
-
-  const selected = entries.find(({ alien }) => alien.id === appState.tradeAlienId);
-
-  if (!selected) {
-    elements.tradeAlienSelection.innerHTML = `
-      <div class="empty-state">
-        <strong>No alien selected.</strong>
-        <p>Choose an alien from your inventory below.</p>
-      </div>`;
-
-    elements.tradeSendButton.disabled = true;
-
-    if (elements.tradeQuantity) {
-      elements.tradeQuantity.disabled = true;
-      elements.tradeQuantity.value = 1;
-    }
-
-    if (elements.tradeQuantityMax) {
-      elements.tradeQuantityMax.textContent = "/ 0";
-    }
-
-    return;
-  }
-
-  const { alien, count } = selected;
-
-  const quantityToSend = Math.min(
-    Math.max(1, Number(appState.tradeQuantity) || 1),
-    count
-  );
-
-  appState.tradeQuantity = quantityToSend;
-
-  elements.tradeAlienSelection.innerHTML = alienCard(
-    alien,
-      quantityToSend,
-    `<div class="selected-trade-label">READY TO SEND</div>`
-  );
-
-  const safeQuantity = Math.min(
-    Math.max(1, Number(appState.tradeQuantity) || 1),
-    count
-  );
-
-  appState.tradeQuantity = safeQuantity;
-
-  if (elements.tradeQuantity) {
-    elements.tradeQuantity.disabled = false;
-    elements.tradeQuantity.min = "1";
-    elements.tradeQuantity.max = String(count);
-    elements.tradeQuantity.value = String(safeQuantity);
-  }
-
-  if (elements.tradeQuantityMax) {
-    elements.tradeQuantityMax.textContent = `/ ${count}`;
-  }
-
-  const recipient = elements.tradeRecipient.value.trim();
-
-  elements.tradeSendButton.disabled = !recipient;
-}
-
-function renderLeaderboard() {
-  const leaderboard = appState.game?.leaderboard;
-  if (!leaderboard) return;
-  elements.rankBadge.textContent = `Rank #${leaderboard.activeRank || "—"}`;
-  if (!leaderboard.rows.length) {
-    elements.leaderboardRows.innerHTML = `<div class="empty-state"><strong>No pilots yet.</strong><p>Be the first name in orbit.</p></div>`;
-    return;
-  }
-  elements.leaderboardRows.innerHTML = leaderboard.rows.map((row) => `
-    <div class="leaderboard-row ${row.isCurrentPlayer ? "current" : ""}" role="row">
-      <span class="rank-number">#${row.rank}</span>
-      <span class="row-name">${escapeHtml(row.name)}${row.isCurrentPlayer ? " (You)" : ""}</span>
-      <span class="row-money">${formatMoney(row.money)}</span>
-      <span class="row-rolls">${row.total_rolls}</span>
-    </div>`).join("");
-}
-
-function updateRollStatus() {
-  const player = currentPlayer();
-  if (!player) return;
-  elements.rollButton.disabled = appState.rolling;
-  if (appState.rolling) {
-    elements.cooldown.textContent = "ROLLING";
-    elements.rollHint.textContent = "The quantum core is searching the outer systems…";
-  } else {
-    elements.cooldown.textContent = "READY";
-    elements.rollHint.textContent = `Tap the dice to materialize a new alien. Current roll takes ${(player.rollAnimationMs / 1000).toFixed(2)}s.`;
-  }
-}
-
-function updateTemporaryLuckStatus() {
-  const player = currentPlayer();
-
-  if (!player || !player.temporaryLuck) {
-    return;
-  }
-
-  const luck = Number(player.temporaryLuck.value) || 0;
-  const expiresAt = Number(player.temporaryLuck.expiresAt) || 0;
-  const remainingMs = expiresAt - Date.now();
-
-  if (luck > 0 && remainingMs > 0) {
-    const remainingSeconds = Math.ceil(remainingMs / 1000);
-
-    elements.temporaryLuckStatus.classList.add("is-active");
-    elements.temporaryLuckStatusValue.textContent =
-      `${formatTemporaryLuck(luck)} LUCK`;
-    elements.temporaryLuckStatusTimer.textContent =
-      `${String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:${String(remainingSeconds % 60).padStart(2, "0")}`;
-  } else {
-    elements.temporaryLuckStatus.classList.remove("is-active");
-    elements.temporaryLuckStatusValue.textContent = "Not active";
-    elements.temporaryLuckStatusTimer.textContent = "Activate in Shop";
-  }
-}
-
-function updateDynamicAffordability() {
-  document.querySelectorAll("[data-cost]").forEach((button) => {
-    const cost = Number(button.dataset.cost);
-    const affordable = Number.isFinite(cost) && appState.estimatedMoney + 0.00001 >= cost;
-    button.disabled = !affordable;
-    const price = button.querySelector(".price");
-    if (price) {
-      price.classList.toggle("affordable", affordable);
-      price.classList.toggle("unaffordable", !affordable);
-    }
-  });
-}
-
-function renderAll() {
-  if (!currentPlayer()) return;
-  renderHeader();
-  renderInventory();
-  renderSlots();
-  renderShop();
-  renderTrading();
-  renderLeaderboard();
-  updateRollStatus();
-  updateDynamicAffordability();
-  updateTemporaryLuckStatus();
-  setView(appState.activeView, false);
-}
-
-function setView(view, focus = true) {
-  if (!currentPlayer()) return;
-  appState.activeView = view;
-  document.querySelectorAll(".view").forEach((section) => { section.hidden = section.id !== `${view}View`; });
-  document.querySelectorAll(".nav-tab").forEach((button) => {
-    const active = button.dataset.view === view;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-current", active ? "page" : "false");
-  });
-  if (focus) window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
-function openPlacement(slot) {
-  const entries = inventoryEntries();
-  if (slot < 0 || !entries.length) {
-    showToast("Roll an alien before opening a container.", "error");
-    return;
-  }
-  appState.placementSlot = slot;
-  elements.placementChoices.innerHTML = entries.map(({ alien, count }) => `
-    <button class="choice-button" type="button" data-place-alien="${escapeHtml(alien.id)}">
-      <span class="choice-top" style="--alien-color:${escapeHtml(alien.color)}"><span class="alien-portrait" aria-hidden="true">${escapeHtml(alien.icon)}</span><b>${escapeHtml(alien.name)}</b></span>
-      <small>${formatRate(alien.money_per_sec)} / sec</small><em>${count} in storage · ${alien.tier}</em>
-    </button>`).join("");
-  elements.placementModal.classList.add("is-open");
-  elements.placementModal.setAttribute("aria-hidden", "false");
-}
-
-function closePlacement() {
-  appState.placementSlot = null;
-  elements.placementModal.classList.remove("is-open");
-  elements.placementModal.setAttribute("aria-hidden", "true");
-}
-
-async function handleAction(request, successMessage) {
+async function act(path, body, success, options = {}) {
   try {
-    const response = await request();
-    acceptGameState(response);
-    if (successMessage) showToast(successMessage);
-    return true;
+    const payload = await api(path, { method: "POST", body: JSON.stringify({ ...body, mutationId: requestId() }) });
+    if (payload?.state) acceptGameState(payload);
+    if (payload.ok === false) { playSound("error"); showToast(payload.error || "That action could not be completed.", "error"); return null; }
+    if (success) { playSound(options.sound || "purchase"); showToast(success); }
+    return payload;
   } catch (error) {
     if (error.payload?.state) acceptGameState(error.payload);
     if (error.status === 401) return showLogin();
-
-    playErrorSound();
-    showToast(error.message, "error");
-    
-    return false;
+    playSound("error"); showToast(error.message, "error"); return null;
   }
 }
 
-function wait(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function renderShell() {
+  const p = player(); if (!p) return;
+  dom.pilotName.textContent = p.name; dom.moneyDisplay.textContent = N.coins(state.estimatedMoney); dom.incomeDisplay.textContent = `+${N.coins(p.incomePerSecond)} / sec`;
+  dom.headerAvatar.textContent = state.lastResult?.emoji || "👾";
+  dom.luckValue.textContent = N.luck(p.currentLuck); dom.pendingLuck.textContent = p.pendingLuck > 0 ? `Charged +${N.luck(p.pendingLuck)}` : "No pending boost";
+  dom.diceCount.textContent = `${p.diceCount} ${p.diceCount === 1 ? "DIE" : "DICE"}`;
+  dom.autoRollButton.classList.toggle("is-active", p.autoRollActive); dom.autoRollLabel.textContent = p.autoRollActive ? "AUTO ROLL · ON" : "AUTO ROLL";
+  dom.rollButton.disabled = state.rolling; dom.rollHint.textContent = state.rolling ? "The dice are drawing a server-authorized signal…" : `${p.diceCount} independent server roll${p.diceCount === 1 ? "" : "s"} per throw.`;
+  [dom.animationSetting, dom.discoverySetting].forEach((button) => button.classList.remove("is-on"));
+  dom.animationSetting.classList.toggle("is-on", p.settings.rollingAnimation); dom.discoverySetting.classList.toggle("is-on", p.settings.fullDiscovery);
+  renderView(state.activeView);
 }
-
-function shuffledRollCandidates(finalAlien) {
-  const candidates = [...appState.catalog.values()].filter(
-    (alien) => alien.id !== finalAlien.id
-  );
-
-  // Fisher-Yates shuffle
-  for (let index = candidates.length - 1; index > 0; index -= 1) {
-    const randomIndex = Math.floor(Math.random() * (index + 1));
-
-    [candidates[index], candidates[randomIndex]] = [
-      candidates[randomIndex],
-      candidates[index]
-    ];
-  }
-
-  // Prevent an empty candidate list from breaking the animation.
-  if (candidates.length === 0) {
-    candidates.push(finalAlien);
-  }
-
-  return candidates;
+function setView(view) {
+  state.activeView = view;
+  document.querySelectorAll(".view").forEach((element) => { element.hidden = element.id !== `${view}View`; });
+  document.querySelectorAll(".nav-tab").forEach((button) => button.classList.toggle("is-active", button.dataset.view === view));
+  renderView(view); playSound("menu"); window.scrollTo({ top: 0, behavior: "smooth" });
 }
+function renderView(view) { if (view === "inventory") { renderInventory(); refreshInventoryIfNeeded(); } else if (view === "shop") renderShop(); else if (view === "ranks") { renderRanks(); refreshRanks(); refreshCatalogIfNeeded(); } else if (view === "trading") { renderTrades(); refreshTrades(); } }
 
-function renderReelFrame(alien, finalFrame = false) {
-  elements.alienReel.innerHTML = `
-    <div
-      class="reel-frame ${finalFrame ? "is-final" : ""}"
-      style="--alien-color:${escapeHtml(alien.color)}"
-    >
-      <span class="reel-scan-line" aria-hidden="true"></span>
-
-      <span class="alien-portrait" aria-hidden="true">
-        ${escapeHtml(alien.icon)}
-      </span>
-
-      <span class="reel-frame-info">
-        <b>${escapeHtml(alien.name)}</b>
-        <small>
-          ${escapeHtml(alien.tier)}
-          · ${formatRarity(alien.rarityDenominator)}
-        </small>
-      </span>
-
-      <em>${finalFrame ? "LOCKED" : "SCANNING"}</em>
-    </div>
-  `;
+function card(entry, action = "", compact = false) {
+  const shiny = plusLabel(entry.plusLevel);
+  return `<article class="alien-card ${compact ? "compact" : ""}" style="--alien-color:${escapeHtml(entry.color)}"><span class="count-badge">×${N.number(entry.count || 1)}</span><div class="alien-top"><span class="alien-portrait">${escapeHtml(entry.emoji)}</span><div><h3>${escapeHtml(entry.name)}${shiny}</h3><strong>${escapeHtml(entry.rarity).toUpperCase()}</strong></div></div><p class="chance-line" title="1 / ${escapeHtml(entry.baseChance)}">${N.chance(entry.baseChance)}</p>${entry.income !== undefined ? `<p class="income-line">+${N.coins(entry.income)} <small>/ sec</small></p>` : ""}${action}</article>`;
 }
-
-function wait(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function renderInventory() {
+  const p = player(); if (!p) return; const inv = state.inventory;
+  dom.inventoryCount.textContent = `${N.number(inv.totalCopies)} stored · ${N.number(p.stats.collection)} indexed`;
+  dom.teamIncome.textContent = `+${N.coins(p.incomePerSecond)} / sec`;
+  dom.teamGrid.innerHTML = p.placedAliens.map((entry, index) => entry ? `<div class="team-slot populated">${card(entry, `<button class="card-action" type="button" data-recall="${index}">RECALL</button>`, true)}</div>` : `<button class="team-slot empty" type="button" data-slot="${index}"><span>◈</span><b>EMPTY BOX</b><small>Deploy an alien</small></button>`).join("");
+  dom.inventoryGrid.innerHTML = inv.entries.length ? inv.entries.map((entry) => card(entry, `<button class="card-action" type="button" data-deploy="${escapeHtml(entry.stackKey)}">DEPLOY</button>`)).join("") : `<div class="empty-state">No stored aliens yet. The dice are waiting.</div>`;
+  dom.inventoryMoreButton.hidden = inv.nextOffset === null;
 }
-
-function wait(milliseconds) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
+async function refreshInventory(reset = false) {
+  if (!player() || state.inventory.loading) return; const inv = state.inventory; inv.loading = true;
+  const offset = reset ? 0 : (inv.nextOffset ?? 0); const search = encodeURIComponent(inv.search);
+  try { const data = await api(`/api/inventory?offset=${offset}&limit=60&search=${search}`); inv.entries = reset ? data.entries : [...inv.entries, ...data.entries]; inv.nextOffset = data.nextOffset; inv.totalCopies = data.totalCopies; inv.totalStacks = data.totalStacks; if (state.activeView === "inventory") renderInventory(); }
+  catch (error) { if (error.status === 401) showLogin(); } finally { inv.loading = false; }
 }
-
-async function animateAlienReel(finalAlien, duration) {
-  const startTime = performance.now();
-  const endTime = startTime + duration;
-
-  const candidates = shuffledRollCandidates(finalAlien);
-
-  elements.alienReel.classList.add("is-active");
-
-  let candidateIndex = 0;
-
-  while (performance.now() < endTime) {
-    const alien = candidates[candidateIndex % candidates.length];
-
-    renderReelFrame(alien, false);
-    candidateIndex += 1;
-
-    const elapsed = performance.now() - startTime;
-    const progress = Math.min(1, elapsed / duration);
-
-    // Fast at the beginning, slower near the end.
-    const delay = Math.round(
-      55 + 285 * Math.pow(progress, 2)
-    );
-
-    const remaining = endTime - performance.now();
-
-    if (remaining <= 0) {
-      break;
-    }
-
-    await wait(Math.min(delay, remaining));
-  }
-
-  // Make sure the full duration has elapsed.
-  const remaining = endTime - performance.now();
-
-  if (remaining > 0) {
-    await wait(remaining);
-  }
-
-  // Only now reveal the actual server-selected alien.
-  renderReelFrame(finalAlien, true);
-
-  elements.alienReel.classList.add("reveal-complete");
-
-  await wait(420);
-
-  elements.alienReel.classList.remove("is-active");
-  elements.alienReel.classList.remove("reveal-complete");
-  elements.alienReel.innerHTML = "";
+function refreshInventoryIfNeeded() { if (!state.inventory.entries.length && !state.inventory.loading) refreshInventory(true); }
+function renderShop() {
+  const p = player(); if (!p) return;
+  const labels = { luck: (upgrade) => `NOW ${N.luck(upgrade.current)} · NEXT ${N.luck(upgrade.next)}`, speed: (upgrade) => `NOW ${Math.round(upgrade.current * 100)}% faster · NEXT ${Math.round(upgrade.next * 100)}%`, coin: (upgrade) => `NOW x${N.number(upgrade.current)} income · NEXT x${N.number(upgrade.next)}` };
+  dom.shopGrid.innerHTML = Object.entries(p.upgrades).map(([key, upgrade]) => `<article class="shop-card"><span class="shop-icon">${escapeHtml(upgrade.icon)}</span><p class="eyebrow">LEVEL ${upgrade.level}</p><h3>${escapeHtml(upgrade.label)}</h3><p>${escapeHtml(upgrade.description)}</p><strong class="upgrade-readout">${labels[key](upgrade)}</strong><button class="primary-button compact-button" type="button" data-upgrade="${key}" ${p.money < upgrade.cost ? "disabled" : ""}>UPGRADE <span>${N.coins(upgrade.cost)}</span></button></article>`).join("") + `<article class="shop-card dice-card"><span class="shop-icon">🎲</span><p class="eyebrow">MAJOR MILESTONE</p><h3>Dice Quantity</h3><p>One additional die means one more independently-authorized reward per roll. Its curve is intentionally severe.</p><strong class="upgrade-readout">${p.diceCount} dice → ${p.diceCount + 1}</strong><button id="buyDice" class="primary-button compact-button" type="button" ${!Number.isFinite(p.diceCost) || p.money < p.diceCost ? "disabled" : ""}>ADD A DIE <span>${Number.isFinite(p.diceCost) ? N.coins(p.diceCost) : "MAX"}</span></button></article>`;
 }
+function renderRanks() {
+  const p = player(); if (!p) return; const stats = state.ranks?.stats || p.stats;
+  dom.rankBadge.textContent = `Rank #${state.ranks?.rank || "—"}`; dom.indexProgress.textContent = `${N.number(stats.collection)} / ${N.number(stats.collectionTotal)}`;
+  const cards = [["Rolls", N.number(stats.rolls)], ["Rarest Signal", stats.rarestAlien?.name || "—"], ["Best Chance", stats.rarestAlien ? N.chance(stats.rarestAlien.baseChance) : "—"], ["Coins Earned", N.coins(stats.coinsEarned)], ["Current Luck", N.luck(stats.currentLuck)], ["Playtime", N.duration(stats.playtimeSeconds)]];
+  dom.progressStats.innerHTML = cards.map(([label, value]) => `<article><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></article>`).join("");
+  dom.catalogGrid.innerHTML = state.catalog.entries.map((entry) => `<article class="index-card ${entry.discovered ? "found" : "locked"}" style="--alien-color:${escapeHtml(entry.color)}"><span>${entry.discovered ? escapeHtml(entry.emoji) : "?"}</span><div><b>${entry.discovered ? escapeHtml(entry.name) : "Unknown Signal"}</b><small>${escapeHtml(entry.rarity).toUpperCase()} · <i title="1 / ${escapeHtml(entry.baseChance)}">${N.chance(entry.baseChance)}</i></small></div></article>`).join("") || `<div class="empty-state">Loading catalog signals…</div>`;
+  dom.catalogMoreButton.hidden = state.catalog.nextOffset === null;
+  dom.rankRows.innerHTML = state.ranks?.rows?.length ? state.ranks.rows.map((row) => `<button class="rank-row ${row.isCurrentPlayer ? "you" : ""}" type="button" data-profile="${escapeHtml(row.id)}"><b>#${row.rank}</b><span>${escapeHtml(row.name)}${row.isCurrentPlayer ? " (YOU)" : ""}</span><i>${row.top ? `${escapeHtml(row.top.emoji)} ${escapeHtml(row.top.rarity)} · ${N.chance(row.top.baseChance)}` : "No signal"}</i></button>`).join("") : `<div class="empty-state">Loading station ranks…</div>`;
+}
+async function refreshCatalog(reset = false) { if (!player() || state.catalog.loading) return; const dataState = state.catalog; dataState.loading = true; try { const offset = reset ? 0 : (dataState.nextOffset ?? 0); const result = await api(`/api/catalog?offset=${offset}&limit=80&search=${encodeURIComponent(dataState.search)}`); dataState.entries = reset ? result.entries : [...dataState.entries, ...result.entries]; dataState.nextOffset = result.nextOffset; dataState.total = result.total; if (state.activeView === "ranks") renderRanks(); } catch (error) { if (error.status === 401) showLogin(); } finally { dataState.loading = false; } }
+function refreshCatalogIfNeeded() { if (!state.catalog.entries.length && !state.catalog.loading) refreshCatalog(true); }
+async function refreshRanks() { if (!player()) return; try { state.ranks = await api("/api/ranks"); if (state.activeView === "ranks") renderRanks(); } catch (error) { if (error.status === 401) showLogin(); } }
 
-function showDiscovery(alien) {
-      const existing = document.querySelector(".discovery-banner");
-      if (existing) existing.remove();
-
-      const banner = document.createElement("div");
-
-      banner.className = "discovery-banner";
-      banner.style.setProperty("--alien-color", alien.color);
-
-      banner.innerHTML = `
-        <div class="discovery-backdrop"></div>
-
-        <div class="discovery-content">
-          <span class="discovery-label">NEW ALIEN</span>
-
-          <div class="discovery-icon">
-            ${escapeHtml(alien.icon)}
-          </div>
-
-          <div class="discovery-title">DISCOVERED</div>
-
-          <div class="discovery-name">
-            ${escapeHtml(alien.name)}
-          </div>
-
-          <div class="discovery-details">
-            ${escapeHtml(alien.tier)}
-            <span>•</span>
-            ${formatRate(alien.money_per_sec)} / sec
-          </div>
-        </div>
-      `;
-
-      document.body.appendChild(banner);
-
-      requestAnimationFrame(() => {
-        banner.classList.add("is-visible");
-      });
-
-      setTimeout(() => {
-        banner.classList.remove("is-visible");
-
-        setTimeout(() => {
-          banner.remove();
-        }, 450);
-      }, 2800);
-    }
-
+function renderResult(alien, rollCount = 1) {
+  if (!alien) return; const previous = currentResultTitle(); state.lastResult = alien; dom.resultBox.classList.remove("is-scanning", "is-near-reveal"); dom.resultBox.classList.add("is-revealed"); dom.resultIcon.textContent = alien.emoji; dom.resultState.textContent = alien.rarity.toUpperCase(); dom.resultName.textContent = `${alien.name}${plusLabel(alien.plusLevel)}`; dom.resultInfo.textContent = `${N.chance(alien.baseChance)} · ${rollCount > 1 ? `${rollCount} dice resolved` : "Signal acquired"}`; dom.previousResult.textContent = previous; dom.nextResult.textContent = "LOCKED";
+}
+const SCAN_MESSAGES = ["Charging the probability lattice", "Signals crossing the roll core", "Reading a volatile frequency", "Stabilizing the unknown", "One outcome is taking shape"];
+function scanFrame(label, detail = "The outcome is still unknown…") { dom.resultBox.classList.add("is-scanning"); dom.resultBox.classList.remove("is-revealed"); dom.resultState.textContent = "SIGNAL SCAN"; dom.resultName.textContent = label; dom.resultInfo.textContent = detail; dom.nextResult.textContent = "UNRESOLVED"; }
+function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+function rollTier(alien) { const log = Number(alien?.baseChanceLog) || 0; if (log >= 23) return 5; if (log >= 13.2) return 4; if (log >= 8) return 3; if (log >= 6.4) return 2; if (log >= 5.25) return 1; return 0; }
+function restartClass(element, className) { element.classList.remove(className); void element.offsetWidth; element.classList.add(className); }
+function flashRoll(kind = "pulse") { dom.rollFlash.dataset.kind = kind; restartClass(dom.rollFlash, "is-active"); }
+function makeRollParticles(count, color, payoff = false) {
+  dom.rollFx.replaceChildren(); dom.rollFx.style.setProperty("--roll-color", color || "var(--mint)"); const fragment = document.createDocumentFragment();
+  for (let index = 0; index < count; index += 1) { const particle = document.createElement("i"); const angle = (Math.PI * 2 * index) / count + Math.random() * .42; const distance = 80 + Math.random() * 175; particle.className = `roll-particle${payoff ? " payoff" : ""}`; particle.style.setProperty("--x", `${Math.cos(angle) * distance}px`); particle.style.setProperty("--y", `${Math.sin(angle) * distance}px`); particle.style.setProperty("--delay", `${Math.random() * .18}s`); particle.style.setProperty("--size", `${3 + Math.random() * 6}px`); fragment.append(particle); }
+  dom.rollFx.append(fragment);
+}
+function beginRollPresentation() {
+  const presentation = { scanner: null, generation: ++state.rollFxGeneration }; const duration = Math.max(900, Number(player()?.rollAnimationMs) || 900);
+  document.body.classList.add("is-rolling"); dom.rollingMain.classList.remove("is-payoff", "is-near-reveal", "is-result-known"); dom.rollingMain.classList.add("is-rolling", "is-searching"); dom.resultBox.classList.remove("is-revealed", "is-payoff", "is-near-reveal"); dom.resultBox.classList.add("roll-energy"); dom.resultBox.style.setProperty("--roll-color", "var(--mint)"); dom.dice.style.setProperty("--roll-duration", `${duration}ms`); dom.dice.classList.add("is-rolling"); makeRollParticles(13, "var(--mint)"); scanFrame(SCAN_MESSAGES[0], "Dice committed · server is drawing the result"); playSound("rollStart");
+  let frame = 1; presentation.scanner = window.setInterval(() => { scanFrame(SCAN_MESSAGES[frame % SCAN_MESSAGES.length]); if (frame % 2 === 0) playSound("rollTick"); frame += 1; }, 170); return presentation;
+}
+function finishRollPresentation(presentation, payoff = false) {
+  if (presentation?.scanner) window.clearInterval(presentation.scanner); dom.dice.classList.remove("is-rolling"); dom.dice.style.removeProperty("--roll-duration"); dom.resultBox.classList.remove("roll-energy", "is-near-reveal");
+  const clear = () => { if (presentation && presentation.generation !== state.rollFxGeneration) return; document.body.classList.remove("is-rolling"); dom.rollingMain.classList.remove("is-rolling", "is-searching", "is-result-known", "is-near-reveal", "is-payoff"); dom.resultBox.classList.remove("is-payoff"); dom.rollFx.replaceChildren(); };
+  if (payoff && !reducedMotion()) window.setTimeout(clear, 820); else clear();
+}
+async function animateRoll(result, presentation) {
+  const p = player(); const full = p.settings.rollingAnimation && !reducedMotion(); const tier = rollTier(result.featured); const color = result.featured.color || "var(--mint)";
+  if (presentation?.scanner) window.clearInterval(presentation.scanner); dom.resultBox.style.setProperty("--roll-color", color); dom.rollingMain.style.setProperty("--roll-color", color); dom.rollingMain.dataset.rollTier = String(tier); dom.rollingMain.classList.add("is-result-known"); makeRollParticles(14 + tier * 5, color);
+  if (!full) { renderResult(result.featured, result.results.length); flashRoll(tier >= 3 ? "rare" : "pulse"); makeRollParticles(14 + tier * 5, color, true); playSound("rollReveal"); if (tier >= 3) playSound("rareReveal"); finishRollPresentation(presentation, true); return; }
+  const beats = 3 + tier; const crescendoMs = Math.max(720, Math.min(1450, Math.round(p.rollAnimationMs * (.37 + tier * .06))));
+  for (let beat = 0; beat < beats; beat += 1) { const nearReveal = beat === beats - 1; if (nearReveal) { dom.rollingMain.classList.add("is-near-reveal"); dom.resultBox.classList.add("is-near-reveal"); flashRoll(tier >= 3 ? "rare" : "pulse"); } else if (beat > 0 && tier >= 2) flashRoll("pulse"); scanFrame(nearReveal ? "SIGNAL LOCKED — REVEALING" : SCAN_MESSAGES[(beat + 1) % SCAN_MESSAGES.length], nearReveal ? "Do not blink." : `${Math.round(((beat + 1) / beats) * 100)}% probability lock`); playSound("rollTick"); await delay(Math.max(95, Math.round(crescendoMs / beats))); }
+  dom.resultBox.classList.remove("is-scanning"); dom.resultBox.classList.add("is-payoff"); dom.rollingMain.classList.add("is-payoff"); flashRoll(tier >= 3 ? "rare" : "reveal"); makeRollParticles(20 + tier * 7, color, true); renderResult(result.featured, result.results.length); playSound("rollReveal"); if (tier >= 3) playSound("rareReveal"); finishRollPresentation(presentation, true);
+}
 async function rollDice() {
-  if (appState.rolling || !currentPlayer()) return;
+  if (state.rolling || !player()) return; state.rolling = true; renderShell(); const presentation = beginRollPresentation();
+  try { const result = await api("/api/roll", { method: "POST", body: JSON.stringify({ mutationId: requestId() }) }); if (!result.ok) { finishRollPresentation(presentation); acceptGameState(result); showToast(result.error, "error"); return; } await animateRoll(result, presentation); acceptGameState(result); state.inventory.entries = []; if (state.activeView === "inventory") refreshInventory(true); if (result.discovery) showDiscovery(result.discovery); else showToast(`${result.featured.name} joined your inventory.`); }
+  catch (error) { finishRollPresentation(presentation); if (error.payload?.state) acceptGameState(error.payload); if (error.status === 401) showLogin(); else { playSound("error"); showToast(error.message, "error"); } }
+  finally { state.rolling = false; renderShell(); scheduleAutoRoll(); }
+}
+function scheduleAutoRoll() { clearTimeout(state.autoTimer); const p = player(); if (!p?.autoRollActive || state.rolling) return; const pause = p.settings.rollingAnimation ? Math.max(900, Math.round(p.rollAnimationMs * .5)) : 900; state.autoTimer = setTimeout(() => { if (player()?.autoRollActive && document.visibilityState === "visible") rollDice(); }, pause); }
+function showDiscovery(alien) { playSound("discovery"); state.lastDiscovery = alien; dom.discoveryIcon.textContent = alien.emoji; dom.discoveryName.textContent = alien.name; dom.discoveryRarity.textContent = alien.rarity.toUpperCase(); dom.discoveryChance.textContent = N.chance(alien.baseChance); dom.discoveryCard.style.setProperty("--alien-color", alien.color); if (player().settings.fullDiscovery) { dom.discoveryModal.classList.add("is-open"); dom.discoveryModal.setAttribute("aria-hidden", "false"); } else minimizeDiscovery(); }
+function minimizeDiscovery() { const alien = state.lastDiscovery; dom.discoveryModal.classList.remove("is-open"); dom.discoveryModal.setAttribute("aria-hidden", "true"); if (!alien) return; dom.discoveryMini.innerHTML = `<span>${escapeHtml(alien.emoji)}</span> NEW: ${escapeHtml(alien.name)}`; dom.discoveryMini.hidden = false; }
 
-  playRollSound();
+function deployStack(key) { const entry = state.inventory.entries.find((item) => item.stackKey === key); if (!entry) return; const slot = player().placedAliens.findIndex((item) => !item); if (slot < 0) return showToast("Recall a team alien before deploying.", "error"); state.placementSlot = slot; dom.placementChoices.innerHTML = card(entry, `<button class="card-action" type="button" data-place="${escapeHtml(key)}">PLACE IN SLOT ${slot + 1}</button>`); openModal(dom.placementModal); }
+function openPlacement(slot) { state.placementSlot = slot; dom.placementChoices.innerHTML = state.inventory.entries.map((entry) => card(entry, `<button class="card-action" type="button" data-place="${escapeHtml(entry.stackKey)}">DEPLOY</button>`)).join(""); openModal(dom.placementModal); }
+function stackFromKey(key) { const [alienId, plus] = String(key).split("|"); return { alienId, plusLevel: Number(plus) }; }
+function sacrificeQuantity(key) { return state.sacrifice.get(key)?.quantity || 0; }
+function setSacrificeQuantity(entry, value) { const quantity = Math.max(0, Math.min(Number(entry.count) || 0, Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0)); if (quantity && !state.sacrifice.has(entry.stackKey) && state.sacrifice.size >= 60) { showToast("A sacrifice can contain up to 60 different stacks.", "error"); return; } if (quantity) state.sacrifice.set(entry.stackKey, { quantity, luck: Number(entry.sacrificeLuck) || 0 }); else state.sacrifice.delete(entry.stackKey); }
+async function refreshSacrificeInventory(reset = false) {
+  const source = state.sacrificeInventory; if (!player() || (!reset && (source.loading || source.nextOffset === null))) return; if (reset) { source.entries = []; source.nextOffset = 0; source.totalStacks = 0; source.generation = (source.generation || 0) + 1; }
+  const generation = source.generation || 0; const offset = reset ? 0 : source.nextOffset; source.loading = true; renderSacrifice();
+  try { const data = await api(`/api/inventory?offset=${offset}&limit=100&search=${encodeURIComponent(source.search)}`); if (generation !== (source.generation || 0)) return; source.entries = reset ? data.entries : [...source.entries, ...data.entries]; source.nextOffset = data.nextOffset; source.totalStacks = data.totalStacks; }
+  catch (error) { if (error.status === 401) showLogin(); else showToast("Could not load sacrifice inventory.", "error"); }
+  finally { if (generation === (source.generation || 0)) { source.loading = false; renderSacrifice(); } }
+}
+function openSacrifice() { const source = state.sacrificeInventory; state.sacrifice.clear(); state.sacrificeSubmitting = false; source.search = ""; source.entries = []; source.nextOffset = 0; source.totalStacks = 0; dom.sacrificeSearch.value = ""; openModal(dom.sacrificeModal); renderSacrifice(); refreshSacrificeInventory(true); }
+function renderSacrifice() {
+  const source = state.sacrificeInventory; const entries = source.entries; let count = 0; let gain = 0; for (const selection of state.sacrifice.values()) { count += selection.quantity; gain += selection.quantity * selection.luck; }
+  const p = player(); dom.sacrificeCount.textContent = N.number(count); dom.sacrificeGain.textContent = N.luck(gain); dom.sacrificeNext.textContent = N.luck(p.permanentLuck * (1 + p.pendingLuck + gain));
+  dom.sacrificeStatus.textContent = source.loading ? "Loading owned aliens…" : entries.length ? `${N.number(entries.length)} of ${N.number(source.totalStacks)} stacks loaded` : source.search ? "No owned aliens match that search." : "No stored aliens available.";
+  dom.sacrificeChoices.innerHTML = entries.length ? entries.map((entry) => { const quantity = sacrificeQuantity(entry.stackKey); return `<article class="selection-card ${quantity ? "selected" : ""}" style="--alien-color:${escapeHtml(entry.color)}"><span>${escapeHtml(entry.emoji)}</span><div><b>${escapeHtml(entry.name)}${plusLabel(entry.plusLevel)}</b><small>${escapeHtml(entry.rarity).toUpperCase()} · ${N.chance(entry.baseChance)}</small><em>Owned: ${N.number(entry.count)} · Selected: ${N.number(quantity)} · ${N.luck(entry.sacrificeLuck)} each</em></div><div class="quantity-stepper"><button type="button" data-sac-minus="${escapeHtml(entry.stackKey)}" ${quantity ? "" : "disabled"} aria-label="Remove one ${escapeHtml(entry.name)}">−</button><input type="number" inputmode="numeric" min="0" max="${Number(entry.count)}" value="${quantity}" data-sac-quantity="${escapeHtml(entry.stackKey)}" aria-label="Sacrifice quantity for ${escapeHtml(entry.name)}"><button type="button" data-sac-plus="${escapeHtml(entry.stackKey)}" ${quantity >= entry.count ? "disabled" : ""} aria-label="Add one ${escapeHtml(entry.name)}">+</button></div></article>`; }).join("") : `<div class="empty-state">${source.loading ? "Scanning your stored aliens…" : "Roll an alien before making this decision."}</div>`;
+  dom.sacrificeMoreButton.hidden = source.loading || source.nextOffset === null; dom.confirmSacrifice.disabled = !count || state.sacrificeSubmitting;
+}
+async function confirmSacrifice() { if (state.sacrificeSubmitting || !state.sacrifice.size) return; state.sacrificeSubmitting = true; renderSacrifice(); const items = [...state.sacrifice.entries()].map(([key, selection]) => ({ ...stackFromKey(key), quantity: selection.quantity })); try { const result = await act("/api/sacrifice", { items }, "Temporary Luck charged for your next roll.", { sound: "purchase" }); if (result) { closeModal(dom.sacrificeModal); state.sacrifice.clear(); state.inventory.entries = []; refreshInventory(true); } } finally { state.sacrificeSubmitting = false; renderSacrifice(); } }
+function openMerge() { state.merge = null; renderMerge(); openModal(dom.mergeModal); }
+function renderMerge() { const choices = state.inventory.entries.filter((entry) => entry.count >= 3 && entry.plusLevel < 3); const selected = state.merge; dom.mergePreview.innerHTML = selected ? `<span>${escapeHtml(selected.emoji)} ${escapeHtml(selected.name)}${plusLabel(selected.plusLevel)} ×3</span><b>→ ${escapeHtml(selected.emoji)} ${escapeHtml(selected.name)}${plusLabel(selected.plusLevel + 1)}</b><small>Consumes 3; creates one permanent +${selected.plusLevel + 1} stack.</small>` : "Choose an eligible stack below."; dom.mergeChoices.innerHTML = choices.length ? choices.map((entry) => `<button class="merge-choice ${selected?.stackKey === entry.stackKey ? "selected" : ""}" type="button" data-merge-choice="${escapeHtml(entry.stackKey)}"><span>${escapeHtml(entry.emoji)}</span><b>${escapeHtml(entry.name)}${plusLabel(entry.plusLevel)}</b><small>${N.number(entry.count)} copies · ${N.chance(entry.baseChance)}</small></button>`).join("") : `<div class="empty-state">No matching stacks of three yet.</div>`; dom.confirmMerge.disabled = !selected; }
 
-  const duration = Math.max(
-    100,
-    Number(currentPlayer().rollAnimationMs) || 2200
-  );
+function renderTrades() { const selected = state.trades.find((room) => room.id === state.selectedTrade) || state.trades.find((room) => room.status === "accepted") || null; if (selected) state.selectedTrade = selected.id; dom.tradeRooms.innerHTML = state.trades.length ? state.trades.map((room) => `<article class="trade-room ${room.id === selected?.id ? "selected" : ""}"><div><small>${escapeHtml(room.status).toUpperCase()}</small><b>${escapeHtml(room.partner)}</b><span>You: ${room.myOffer ? `${escapeHtml(room.myOffer.emoji)} ${escapeHtml(room.myOffer.name)} ×${room.myOffer.count}` : "—"} · Pilot: ${room.partnerOffer ? `${escapeHtml(room.partnerOffer.emoji)} ${escapeHtml(room.partnerOffer.name)} ×${room.partnerOffer.count}` : "—"}</span></div><div>${room.status === "invited" && !room.invitedByMe ? `<button data-accept-trade="${room.id}" type="button">ACCEPT</button>` : ""}<button data-open-trade="${room.id}" type="button">OPEN</button></div></article>`).join("") : `<div class="empty-state">No active trade rooms.</div>`; dom.tradeControls.hidden = !selected || selected.status !== "accepted"; if (!selected || selected.status !== "accepted") return; dom.tradePartner.textContent = `Trade with ${selected.partner}`; const selectedStack = state.tradeStack || state.inventory.entries[0]; if (selectedStack) state.tradeStack = selectedStack; dom.tradeChoices.innerHTML = state.inventory.entries.map((entry) => `<button class="merge-choice ${state.tradeStack?.stackKey === entry.stackKey ? "selected" : ""}" data-trade-stack="${escapeHtml(entry.stackKey)}" type="button"><span>${escapeHtml(entry.emoji)}</span><b>${escapeHtml(entry.name)}${plusLabel(entry.plusLevel)}</b><small>${N.number(entry.count)} owned · ${N.chance(entry.baseChance)}</small></button>`).join(""); state.tradeQuantity = Math.max(1, Math.min(state.tradeQuantity, state.tradeStack?.count || 1)); dom.tradeQuantity.textContent = state.tradeQuantity; dom.tradeConfirm.disabled = !selected.myOffer || !selected.partnerOffer || selected.myConfirmed; }
+async function refreshTrades() { if (!player()) return; try { const data = await api("/api/trade-rooms"); state.trades = data.rooms || []; if (state.activeView === "trading") renderTrades(); } catch (error) { if (error.status === 401) showLogin(); } }
 
-  appState.rolling = true;
-
-  elements.dice.style.setProperty("--roll-duration", `${duration}ms`);
-  elements.dice.classList.add("is-rolling");
-
-  updateRollStatus();
-
-  try {
-    const response = await api("/api/roll", {
-      method: "POST",
-      body: "{}"
-    });
-
-    const previousQuantity =
-      Number(currentPlayer()?.inventory?.[response.rolled.id]) || 0;
-
-    const isNewDiscovery = previousQuantity === 0;
-
-    await animateAlienReel(response.rolled, duration);
-
-    playRevealSound();
-
-    acceptGameState(response);
-
-    const alien = response.rolled;
-
-    // Persistent result card
-    elements.rollResult.innerHTML = `
-      <div
-        class="result-card result-card-reveal"
-        style="--alien-color:${escapeHtml(alien.color)}"
-      >
-        <div class="result-card-glow"></div>
-
-        <div class="alien-portrait" aria-hidden="true">
-          ${escapeHtml(alien.icon)}
-        </div>
-
-        <div class="result-card-info">
-          <span class="tier-label">
-            ${escapeHtml(alien.tier)} · ACQUIRED
-          </span>
-
-          <h3>${escapeHtml(alien.name)}</h3>
-
-          <div class="result-stats">
-            <div>
-              <small>MONEY / SEC</small>
-              <strong>${formatRate(alien.money_per_sec)}</strong>
-            </div>
-
-            <div>
-              <small>RARITY</small>
-              <strong>${formatRarity(alien.rarityDenominator)}</strong>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-
-    if (isNewDiscovery) {
-      playDiscoverySound();
-      showDiscovery(alien);
-    }
-
-    showToast(`${alien.name} added to your hangar.`);
-  } catch (error) {
-    if (error.payload?.state) {
-      acceptGameState(error.payload);
-    }
-
-    if (error.status === 401) {
-      showLogin();
-    } else {
-      showToast(error.message, "error");
-    }
-  } finally {
-    appState.rolling = false;
-
-    elements.dice.classList.remove("is-rolling");
-    elements.dice.style.removeProperty("--roll-duration");
-
-    updateRollStatus();
-  }
+function showLogin() { clearTimeout(state.autoTimer); state.game = null; state.csrfToken = ""; state.rolling = false; dom.app.setAttribute("aria-hidden", "true"); openModal(dom.loginModal); }
+function showGame() { closeModal(dom.loginModal); dom.app.setAttribute("aria-hidden", "false"); setView("rolling"); }
+function pulseAlienBox() {
+  if (state.activeView !== "inventory" || !player()?.incomePerSecond) return;
+  const boxes = [...document.querySelectorAll(".team-slot.populated")];
+  const box = boxes[Math.floor(Math.random() * boxes.length)];
+  if (!box) return;
+  box.classList.add("is-earning");
+  const spark = document.createElement("span"); spark.className = "cash-spark"; spark.textContent = "◈"; box.append(spark); playSound("alienMoney");
+  setTimeout(() => { box.classList.remove("is-earning"); spark.remove(); }, 700);
 }
 
-async function syncGameState() {
-  if (!currentPlayer() || appState.syncInFlight) return;
-  appState.syncInFlight = true;
-  try {
-    acceptGameState(await api("/api/game-state"));
-  } catch (error) {
-    if (error.status === 401) showLogin();
-  } finally {
-    appState.syncInFlight = false;
-  }
-}
-
-function showLogin() {
-  appState.game = null;
-  appState.catalog.clear();
-  appState.rolling = false;
-  closePlacement();
-  elements.app.setAttribute("aria-hidden", "true");
-  elements.loginModal.classList.add("is-open");
-  elements.loginModal.setAttribute("aria-hidden", "false");
-}
-
-function showGame() {
-  elements.loginModal.classList.remove("is-open");
-  elements.loginModal.setAttribute("aria-hidden", "true");
-  elements.app.setAttribute("aria-hidden", "false");
-}
-
-elements.temporaryLuckMoney.addEventListener("input", updateTemporaryLuckPreview);
-
-updateTemporaryLuckPreview();
-
-elements.temporaryLuckActivateButton.addEventListener("click", async () => {
-  const amount = Number(elements.temporaryLuckMoney.value);
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    showToast("Enter a valid amount.");
-    return;
-  }
-
-  elements.temporaryLuckActivateButton.disabled = true;
-
-  try {
-    const game = await api("/api/buy-temporary-luck", {
-      method: "POST",
-      body: JSON.stringify({
-        amount
-      })
-    });
-
-    acceptGameState(game);
-    showToast("Luck Boost activated.");
-  } catch (error) {
-    showToast(error.message || "Could not activate Luck Boost.");
-  } finally {
-    elements.temporaryLuckActivateButton.disabled = false;
-  }
-});
-
-elements.loginForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const submit = elements.loginForm.querySelector("button[type=submit]");
-  const form = new FormData(elements.loginForm);
-  elements.loginError.textContent = "";
-  submit.disabled = true;
-  try {
-    const response = await api("/api/login", { method: "POST", body: JSON.stringify({ username: form.get("username"), password: form.get("password") }) });
-    acceptGameState(response);
-    showGame();
-    showToast(response.created ? "Pilot profile created. Your first roll is free." : "Welcome back to the station.");
-  } catch (error) {
-    elements.loginError.textContent = error.message;
-  } finally {
-    submit.disabled = false;
-  }
-});
-
+dom.loginForm.addEventListener("submit", async (event) => { event.preventDefault(); dom.loginError.textContent = ""; try { const payload = await api("/api/login", { method: "POST", body: JSON.stringify({ username: dom.username.value, password: dom.password.value }) }); acceptGameState(payload); showGame(); showToast(payload.created ? "Pilot linked. Your first roll is ready." : "Welcome back to the station."); } catch (error) { playSound("error"); dom.loginError.textContent = error.message; } });
+dom.logoutButton.addEventListener("click", async () => { try { await api("/api/logout", { method: "POST", body: JSON.stringify({}) }); } finally { showLogin(); } });
+dom.rollButton.addEventListener("click", rollDice);
+dom.autoRollButton.addEventListener("click", async () => { const enabled = !player().autoRollActive; const result = await act("/api/auto-roll", { enabled }, enabled ? "Auto Roll armed. Income is reduced by 20%." : "Auto Roll disabled.", { sound: "autoOn" }); if (result) scheduleAutoRoll(); });
+dom.settingsButton.addEventListener("click", () => openModal(dom.settingsModal));
+dom.animationSetting.addEventListener("click", () => act("/api/settings", { settings: { rollingAnimation: !player().settings.rollingAnimation } }, "Roll presentation setting saved.", { sound: "menu" }));
+dom.discoverySetting.addEventListener("click", () => act("/api/settings", { settings: { fullDiscovery: !player().settings.fullDiscovery } }, "Discovery setting saved.", { sound: "menu" }));
+document.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", () => { if (button.dataset.closeModal === "sacrificeModal") state.sacrifice.clear(); closeModal($("#" + button.dataset.closeModal)); }));
+dom.closeDiscovery.addEventListener("click", () => { dom.discoveryMini.hidden = true; dom.discoveryModal.classList.remove("is-open"); }); dom.minimizeDiscovery.addEventListener("click", minimizeDiscovery); dom.discoveryMini.addEventListener("click", () => { dom.discoveryMini.hidden = true; dom.discoveryModal.classList.add("is-open"); });
+dom.inventorySearch.addEventListener("input", () => { state.inventory.search = dom.inventorySearch.value.trim(); state.inventory.entries = []; state.inventory.nextOffset = 0; refreshInventory(true); }); dom.inventoryMoreButton.addEventListener("click", () => refreshInventory());
+dom.inventoryGrid.addEventListener("click", (event) => { const button = event.target.closest("[data-deploy]"); if (button) deployStack(button.dataset.deploy); }); dom.teamGrid.addEventListener("click", (event) => { const recall = event.target.closest("[data-recall]"); const slot = event.target.closest("[data-slot]"); if (recall) act("/api/remove-alien", { slotIndex: Number(recall.dataset.recall) }, "Alien returned to storage.").then((result) => { if (result) refreshInventory(true); }); if (slot) openPlacement(Number(slot.dataset.slot)); });
+dom.placementChoices.addEventListener("click", (event) => { const button = event.target.closest("[data-place]"); if (!button) return; const item = stackFromKey(button.dataset.place); act("/api/place-alien", { ...item, slotIndex: state.placementSlot }, "Alien deployed to your active team.").then((result) => { if (result) { closeModal(dom.placementModal); refreshInventory(true); } }); });
+dom.mergeButton.addEventListener("click", openMerge); dom.mergeChoices.addEventListener("click", (event) => { const button = event.target.closest("[data-merge-choice]"); if (!button) return; state.merge = state.inventory.entries.find((entry) => entry.stackKey === button.dataset.mergeChoice) || null; renderMerge(); playSound("menu"); }); dom.confirmMerge.addEventListener("click", () => { if (!state.merge) return; act("/api/merge", { alienId: state.merge.id, plusLevel: state.merge.plusLevel }, "Shiny alien forged.", { sound: "merge" }).then((result) => { if (result) { state.merge = null; refreshInventory(true); renderMerge(); } }); });
+dom.equipBestButton.addEventListener("click", () => { dom.teamGrid.classList.add("is-replacing"); act("/api/equip-best", {}, null, { sound: "equip" }).then((result) => { setTimeout(() => dom.teamGrid.classList.remove("is-replacing"), 520); if (result) { showToast(result.changed ? "Best team equipped." : "Your team is already optimal."); refreshInventory(true); } }); });
+dom.openSacrifice.addEventListener("click", openSacrifice); dom.sacrificeSearch.addEventListener("input", () => { state.sacrificeInventory.search = dom.sacrificeSearch.value.trim(); refreshSacrificeInventory(true); }); dom.sacrificeMoreButton.addEventListener("click", () => refreshSacrificeInventory()); dom.sacrificeChoices.addEventListener("click", (event) => { const plus = event.target.closest("[data-sac-plus]"); const minus = event.target.closest("[data-sac-minus]"); const key = plus?.dataset.sacPlus || minus?.dataset.sacMinus; if (!key) return; const entry = state.sacrificeInventory.entries.find((item) => item.stackKey === key); if (!entry) return; setSacrificeQuantity(entry, sacrificeQuantity(key) + (plus ? 1 : -1)); renderSacrifice(); playSound("menu"); }); dom.sacrificeChoices.addEventListener("change", (event) => { const input = event.target.closest("[data-sac-quantity]"); if (!input) return; const entry = state.sacrificeInventory.entries.find((item) => item.stackKey === input.dataset.sacQuantity); if (!entry) return; setSacrificeQuantity(entry, input.value); renderSacrifice(); }); dom.cancelSacrifice.addEventListener("click", () => { state.sacrifice.clear(); closeModal(dom.sacrificeModal); }); dom.confirmSacrifice.addEventListener("click", confirmSacrifice);
+dom.shopGrid.addEventListener("click", (event) => { const upgrade = event.target.closest("[data-upgrade]"); if (upgrade) act("/api/buy-upgrade", { upgrade: upgrade.dataset.upgrade }, "Research upgraded.").then((result) => { if (result) renderShop(); }); if (event.target.closest("#buyDice")) act("/api/buy-dice", {}, "A new die joined the array.", { sound: "rareReveal" }).then((result) => { if (result) renderShop(); }); });
+dom.catalogSearch.addEventListener("input", () => { state.catalog.search = dom.catalogSearch.value.trim(); state.catalog.entries = []; state.catalog.nextOffset = 0; refreshCatalog(true); }); dom.catalogMoreButton.addEventListener("click", () => refreshCatalog()); dom.rankRows.addEventListener("click", (event) => { const button = event.target.closest("[data-profile]"); if (button) showToast("Public pilot profile opens in a future station update."); });
+dom.tradeInvite.addEventListener("click", () => act("/api/trade-rooms", { recipient: dom.tradeRecipient.value.trim() }, "Trade invitation sent.").then((result) => { if (result) { dom.tradeRecipient.value = ""; refreshTrades(); } })); dom.tradeRooms.addEventListener("click", (event) => { const open = event.target.closest("[data-open-trade]"); const accept = event.target.closest("[data-accept-trade]"); if (open) { state.selectedTrade = open.dataset.openTrade; renderTrades(); } if (accept) act(`/api/trade-rooms/${encodeURIComponent(accept.dataset.acceptTrade)}/accept`, {}, "Trade terminal linked.").then((result) => { if (result) { state.selectedTrade = accept.dataset.acceptTrade; refreshTrades(); } }); }); dom.tradeChoices.addEventListener("click", (event) => { const button = event.target.closest("[data-trade-stack]"); if (!button) return; state.tradeStack = state.inventory.entries.find((entry) => entry.stackKey === button.dataset.tradeStack); state.tradeQuantity = 1; renderTrades(); }); dom.tradeMinus.addEventListener("click", () => { state.tradeQuantity = Math.max(1, state.tradeQuantity - 1); renderTrades(); }); dom.tradePlus.addEventListener("click", () => { state.tradeQuantity = Math.min(state.tradeStack?.count || 1, state.tradeQuantity + 1); renderTrades(); }); dom.tradeOffer.addEventListener("click", () => { const room = state.trades.find((item) => item.id === state.selectedTrade); if (!room || !state.tradeStack) return; act(`/api/trade-rooms/${encodeURIComponent(room.id)}/offer`, { alienId: state.tradeStack.id, plusLevel: state.tradeStack.plusLevel, quantity: state.tradeQuantity }, "Offer updated.").then((result) => { if (result) refreshTrades(); }); }); dom.tradeConfirm.addEventListener("click", () => { const room = state.trades.find((item) => item.id === state.selectedTrade); if (!room) return; act(`/api/trade-rooms/${encodeURIComponent(room.id)}/confirm`, {}, null, { sound: "equip" }).then((result) => { if (result) { showToast(result.settled ? "Trade settled securely." : "Confirmation locked; awaiting the other pilot."); refreshTrades(); refreshInventory(true); } }); });
 document.querySelectorAll(".nav-tab").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
-elements.rollButton.addEventListener("click", rollDice);
-elements.closePlacement.addEventListener("click", closePlacement);
-elements.placementModal.addEventListener("click", (event) => { if (event.target === elements.placementModal) closePlacement(); });
-
-elements.inventoryGrid.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-deploy]");
-  if (!button) return;
-  const slot = firstEmptySlot();
-  if (slot < 0) return showToast("All containers are occupied. Unlock another box first.", "error");
-  openPlacement(slot);
-});
-
-elements.slotGrid.addEventListener("click", (event) => {
-  const empty = event.target.closest("[data-empty-slot]");
-  if (empty) return openPlacement(Number(empty.dataset.emptySlot));
-  const recall = event.target.closest("[data-recall-slot]");
-  if (recall) {
-    return handleAction(
-      () => api("/api/remove-alien", { method: "POST", body: JSON.stringify({ slotIndex: Number(recall.dataset.recallSlot) }) }),
-      "Alien recalled to your inventory."
-    );
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { syncGame(); scheduleAutoRoll(); } else clearTimeout(state.autoTimer); });
+async function syncGame() { if (!player() || state.syncBusy || document.visibilityState !== "visible") return; state.syncBusy = true; try { acceptGameState(await api("/api/game-state")); } catch (error) { if (error.status === 401) showLogin(); } finally { state.syncBusy = false; } }
+async function restoreSession() {
+  try {
+    const payload = await api("/api/game-state");
+    if (acceptGameState(payload)) showGame();
+  } catch (error) {
+    if (error.status !== 401) showToast("Could not restore the station connection.", "error");
   }
-  if (event.target.closest("[data-buy-slot]")) {
-    handleAction(() => api("/api/buy-slot", { method: "POST", body: "{}" }), "New alien container unlocked.");
-  }
-});
-
-elements.shopGrid.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-buy-upgrade]");
-  if (!button) return;
-  handleAction(() => api("/api/buy-shop", { method: "POST", body: JSON.stringify({ upgrade: button.dataset.buyUpgrade }) }), "Research upgrade installed.");
-});
-
-elements.tradeQuantity.addEventListener("change", () => {
-  const selected = inventoryEntries().find(
-    ({ alien }) => alien.id === appState.tradeAlienId
-  );
-
-  if (!selected) return;
-
-  const value = Number(elements.tradeQuantity.value);
-
-  appState.tradeQuantity = Math.min(
-    Math.max(1, Number.isSafeInteger(value) ? value : 1),
-    selected.count
-  );
-
-  renderTrading();
-});
-
-elements.tradeInventoryGrid.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-trade-alien]");
-  if (!button) return;
-
-  appState.tradeAlienId = button.dataset.tradeAlien;
-  appState.tradeQuantity = 1;
-  renderTrading();
-});
-
-elements.tradeRecipient.addEventListener("input", () => {
-  const hasRecipient = elements.tradeRecipient.value.trim().length > 0;
-  const hasAlien = Boolean(appState.tradeAlienId);
-  elements.tradeSendButton.disabled = !(hasRecipient && hasAlien);
-});
-
-elements.tradeSendButton.addEventListener("click", async () => {
-  const recipient = elements.tradeRecipient.value.trim();
-  const alienId = appState.tradeAlienId;
-
-  if (!recipient || !alienId) return;
-
-  const success = await handleAction(
-    () => api("/api/trade", {
-      method: "POST",
-      body: JSON.stringify({
-        recipient,
-        alienId,
-        quantity: appState.tradeQuantity
-      })
-    }),
-    `Alien sent to ${recipient}.`
-  );
-
-  if (success) {
-    playTradeSound();
-
-    appState.tradeAlienId = null;
-    elements.tradeRecipient.value = "";
-    renderTrading();
-  }
-});
-
-elements.placementChoices.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-place-alien]");
-    if (!button || appState.placementSlot === null) return;
-
-    const slotIndex = appState.placementSlot;
-
-    handleAction(
-        () => api("/api/place-alien", {
-            method: "POST",
-            body: JSON.stringify({
-                slotIndex,
-                alienId: button.dataset.placeAlien
-            })
-        }),
-        "Alien deployed to your container."
-    ).then((success) => {
-        if (success) {
-            closePlacement();
-        }
-    });
-});
-
-elements.logoutButton.addEventListener("click", async () => {
-  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch { /* The local view can still safely sign out. */ }
-  showLogin();
-  elements.loginForm.reset();
-  showToast("Signed out of the station.");
-});
-
-setInterval(() => {
-  const now = performance.now();
-  if (currentPlayer()) {
-    const seconds = Math.min(2, Math.max(0, now - appState.lastClientTick) / 1000);
-    appState.estimatedMoney += currentPlayer().moneyPerSecond * seconds;
-    renderHeader();
-    updateRollStatus();
-    updateTemporaryLuckStatus();
-    updateDynamicAffordability();
-  }
-  appState.lastClientTick = now;
-}, 250);
-
-document.addEventListener("pointerdown", () => {
-    getAudioContext();
-}, { once: true });
-
-setInterval(syncGameState, 5000);
-
-(async () => {
-    try {
-        const response = await api("/api/game-state");
-        acceptGameState(response);
-        showGame();
-    } catch (error) {
-        console.error("Failed to load game state:", error);
-        showLogin();
-    }
-})();
+}
+window.setInterval(() => { if (!player()) return; const elapsed = (performance.now() - state.lastMoneyTick) / 1000; dom.moneyDisplay.textContent = N.coins(state.estimatedMoney + elapsed * (Number(player().incomePerSecond) || 0)); }, 250);
+window.setInterval(syncGame, 25_000);
+window.setInterval(pulseAlienBox, 3600);
+restoreSession();

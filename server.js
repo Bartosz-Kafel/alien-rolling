@@ -1,1205 +1,257 @@
+"use strict";
+
+/* AFK Alien Dice server
+ * All permanent economy changes pass through one short mutation queue and a
+ * PostgreSQL transaction. The browser only asks for actions; it never submits
+ * balances, probabilities, costs, rewards, luck values, or equipment states.
+ */
 const crypto = require("crypto");
 const express = require("express");
-const fs = require("fs");
 const path = require("path");
 const { Pool } = require("pg");
-
+const { ALIENS, ALIEN_BY_ID, CATALOG_SIZE, REGISTRY_VERSION } = require("./aliens");
+const balance = require("./balance");
 
 const app = express();
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false });
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
-const DATA_FILE = path.join(__dirname, "data.json");
 const SESSION_COOKIE = "afk_session";
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
-const MAX_MONEY = 1_000_000_000_000_000;
-const BASE_ROLL_ANIMATION_MS = 2200;
+const SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const MAX_OFFLINE_SECONDS = 12 * 60 * 60;
+const MAX_INVENTORY_STACK = Number.MAX_SAFE_INTEGER - 1;
+const MAX_MONEY = 1e96;
+const TEAM_SLOT_COUNT = 3;
+const RATE_LIMITS = { login: [10, 60_000], roll: [90, 60_000], buy: [30, 60_000], inventory: [50, 60_000], trade: [40, 60_000] };
 
-// Expanded by 10x (111 prefixes)
-const PREFIXES = [
-  "Space", "Nebula", "Chrono", "Stellar", "Void", "Quantum", "Lunar", "Solar", "Plasma", "Astral", "Eclipse",
-  "Cosmic", "Galactic", "Orion", "Andromeda", "Nova", "Supernova", "Hyper", "Cyber", "Bio", "Geo", "Pyro",
-  "Cryo", "Hydro", "Aero", "Electro", "Pedro", "Abyssal", "Aether", "Nether", "Spectral", "Phantom", "Shadow",
-  "Light", "Dark", "Deep", "High", "Low", "Prime", "Apex", "Omega", "Alpha", "Beta", "Gamma",
-  "Delta", "Epsilon", "Zeta", "Sigma", "Matrix", "Vector", "Helix", "Nexus", "Vortex", "Singularity", "Horizon",
-  "Infinity", "Eternal", "Ancient", "Primal", "Prismatic", "Spectral", "Radiant", "Luminous", "Glimmer", "Twilight", "Obsidian",
-  "Meteor", "Comet", "Asteroid", "Titanium", "Carbon", "Child", "Iron", "Gold", "Quantum", "Nano", "Mega",
-  "Giga", "Black", "Peta", "Exo", "Endo", "Meso", "Proto", "LGBQT+", "Neo", "Retro", "Future",
-  "Zenith", "Gay", "Pinnacle", "Abyss", "Lesbian", "Rift", "Anomaly", "Paradox", "Enigma", "Mirage", "Echo",
-  "Pulse", "Wave", "Ray", "Beam", "Flash", "Spark", "Blaze", "Frost", "Gale", "Quake", "Flux"
-];
+const state = { users: {}, sessions: new Map(), tradeRooms: new Map(), queue: [], busy: false, requests: new Map(), distributionCache: new Map() };
 
-// Expanded by 10x (100 species)
-const SPECIES = [
-  "Slime", "Titan", "Voyager", "Mantis", "Oracle", "Warden", "Drifter", "Leviathan", "Sprite", "Monarch",
-  "Beast", "Stalker", "Hunter", "Predator", "Scout", "Warrior", "Knight", "Mage", "Sorcerer", "Priest",
-  "Shaman", "Druid", "Rogue", "Assassin", "Thief", "Goliath", "Colossus", "Behemoth", "Giant", "Dwarf",
-  "Elf", "Orc", "Goblin", "Troll", "Trump", "Dragon", "Wyvern", "Drake", "Hydra", "Phoenix",
-  "Gryphon", "Pegasus", "Femboy", "Sphinx", "Minotaur", "Centaur", "Cyclops", "Gooner", "Medusa", "Siren",
-  "Mermaid", "Merman", "Kraken", "Cthulhu", "Demon", "Devil", "Angel", "Archangel", "Seraph", "Cherub",
-  "Ghost", "Spirit", "Phantom", "Specter", "Wraith", "Apparition", "Shade", "Shadow", "Ghouls", "Zombie",
-  "Vampire", "Werewolf", "Construct", "Golem", "Robot", "Android", "Cyborg", "Mech", "Machine", "Drone",
-  "Automaton", "Engine", "Core", "Matrix", "Network", "Swarm", "Hive", "Sanchez", "Colony", "Nigger",
-  "Herd", "Pack", "Pride", "School", "Dick", "Clan", "Tribe", "Guild", "Order", "Faction"
-];
-
-// Generates 11,100 unique combinations and takes the first 1,010 (10x your original 101 limit)
-function seededShuffle(items, seed) {
-  const result = [...items];
-  let state = seed >>> 0;
-
-  function random() {
-    state = (1664525 * state + 1013904223) >>> 0;
-    return state;
-  }
-
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const swapIndex = random() % (index + 1);
-
-    [result[index], result[swapIndex]] = [
-      result[swapIndex],
-      result[index]
-    ];
-  }
-
-  return result;
+function number(value, fallback = 0) { const n = Number(value); return Number.isFinite(n) ? n : fallback; }
+function integer(value, fallback = 0) { const n = Number(value); return Number.isSafeInteger(n) ? n : fallback; }
+function bounded(value, low, high) { return Math.min(high, Math.max(low, value)); }
+function mutationId(value) { return typeof value === "string" && /^[a-zA-Z0-9_-]{12,100}$/.test(value) ? value : null; }
+function stackKey(alienId, plusLevel = 0) { return `${alienId}|${plusLevel}`; }
+function parseStackKey(key) {
+  const [alienId, rawPlus] = String(key).split("|");
+  const plusLevel = integer(rawPlus, 0);
+  return ALIEN_BY_ID.has(alienId) && plusLevel >= 0 && plusLevel <= 3 ? { alienId, plusLevel } : null;
+}
+function hashToken(token) { return crypto.createHash("sha256").update(token).digest("base64url"); }
+function onceId() { return crypto.randomUUID().replaceAll("-", ""); }
+function publicAlien(alien) {
+  if (!alien) return null;
+  return { id: alien.id, name: alien.name, emoji: alien.emoji, rarity: alien.rarity, color: alien.color, baseChance: alien.baseChance, baseChanceLog: alien.baseChanceLog, baseIncome: alien.baseIncome };
+}
+function publicStack(alienId, plusLevel, count, coinLevel = 0) {
+  const alien = ALIEN_BY_ID.get(alienId);
+  if (!alien) return null;
+  return { ...publicAlien(alien), plusLevel, stackKey: stackKey(alienId, plusLevel), count, income: balance.incomeFor(alien, plusLevel, coinLevel), power: balance.alienPower(alien, plusLevel), sacrificeLuck: balance.sacrificeLuck(alien, plusLevel) };
 }
 
-const uniquePrefixes = [...new Set(PREFIXES)];
-const uniqueSpecies = [...new Set(SPECIES)];
-
-const combinations = [];
-
-for (const prefix of uniquePrefixes) {
-  for (const species of uniqueSpecies) {
-    combinations.push(`${prefix} ${species}`);
+function normalizeInventory(input) {
+  const inventory = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) return inventory;
+  for (const [rawKey, rawCount] of Object.entries(input)) {
+    // Old saves used an alien ID directly; preserve it as a base stack.
+    const parsed = parseStackKey(rawKey) || (ALIEN_BY_ID.has(rawKey) ? { alienId: rawKey, plusLevel: 0 } : null);
+    const count = integer(rawCount);
+    if (!parsed || count < 1 || count > MAX_INVENTORY_STACK) continue;
+    inventory[stackKey(parsed.alienId, parsed.plusLevel)] = count;
   }
+  return inventory;
 }
-
-// Always produces the same shuffled order
-const shuffledNames = seededShuffle(combinations, 0xA17E1D);
-
-const ALIEN_NAMES = shuffledNames.slice(0, 1010);
-
-// Expanded by over 10x (165 sci-fi, space, alien, and abstract icons)
-const ALIEN_ICONS = [
-  "👾", "🛸", "👽", "🪼", "🦑", "🦠", "🐙", "🤖", "🤖", "🦿", "🦾", "🧌",
-  "🪐", "🌌", "☄️", "🛰️", "🌠", "🚀", "🔭", "📡", "☀️", "🌙", "⭐", "🌟", 
-  "✨", "🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘", "🌙", "🌚", "🌛", 
-  "🌜", "🌞", "🌍", "🌎", "🌏", "🌀", "🌋", "☄️", "🌌", "🪐", "🌟", "⭐",
-  "🔮", "🧬", "⚛️", "⚡", "💥", "🔥", "💎", "🧿", "🌟", "☄️", "📿", "👑",
-  "💫", "🔋", "🔌", "🕯️", "💡", "🏮", "💎", "🔮", "🧿", "🌀", "☣️", "☢️",
-  "💠", "🌀", "💮", "💮", "🎴", "🔱", "⚜️", "👁️", "🧠", "💀", "☠️", "👻",
-  "🍄", "🌵", "🌴", "🌱", "🌿", "☘️", "🍀", "🍁", "🍂", "🍃", "🥀", "🌻", 
-  "🌼", "🌽", "🌾", "🌿", "🍄", "🌰", "🌲", "🌳", "🌴", "🌵", "🌶️", "🪨",
-  "🦕", "🦖", "🐊", "🐍", "🐢", "🦎", "🦂", "🕷️", "🪳", "🪰", "🪲", "🦗", 
-  "🐜", "🐝", "🪱", "🦋", "🐌", "🐛", "🐜", "🐝", "🐞", "🦗", "🕷️", "🦂",
-  "🌪️", "🌈", "💧", "🌊", "❄️", "💨", "🌫️", "🌬️", "☄️", "🔥", "💧", "⚡",
-  "❄️", "☃️", "⛄", "🌬️", "💨", "🌪️", "🌫️", "🌈", "☔", "⚡", "🌀", "🌊",
-  "🛑", "⚙️", "🛠️", "🧪", "🧫", "🔬", "🛡️", "⚔️", "🏹", "🗡️", "🪃", "⛓️",
-  "💣", "🗝️", "🔑", "🔒", "🔓", "🔏", "🔐", "⚖️", "🧭", "⏳", "⌛", "🔋",
-  "⚙️", "🔧", "🔨", "⚒️", "🛠️", "⛏️", "🔩", "⚙️", "🗜️", "⚖️", "⛓️", "🛡️"
-];
-
-
-// Expanded by 10x (80 progression tiers scaled proportionally up to index 1010)
-const TIER_NAMES = [
-  "Garbage", "Space Junk", "Bio-Waste", "Scrap Metal", "Bottom Feeder", "Fodder", "Stray", "Drifter", "Rookie", "Survivor",
-  "Scavenger", "Marauder", "Vanguard", "Enforcer", "Bio-Hazard", "Toxic Mutated", "Cyber-Augmented", "Apex Stalker", "Infiltrator", "Overlord",
-  "Anomaly", "Glitch", "Void Walker", "Abyssal", "Phantom", "Specter", "Chronos-Warped", "Quantum Shifted", "Singularity", "Eon Walker",
-  "World Eater", "Planet Buster", "Star Crusher", "Solar Flare", "Supernova", "Event Horizon", "Cosmic Storm", "Nebula Spawn", "Stellar Sovereign", "Galaxy Tyrant",
-  "Astral Titan", "Celestial", "Immortal", "Eldritch Horror", "Void Sovereign", "Nether King", "Aether Lord", "Primordial", "Ancient Terror", "Doomsday",
-  "Demi-God", "Godlike", "Deity", "Pantheon Elite", "Reality Warper", "Time Weaver", "Space Bender", "Dimensional Lord", "Astral Emperor", "Infinite",
-  "Omnipotent", "Omnipresent", "Absolute Zero", "Eternal Flame", "Cosmic Blueprint", "Matrix Core", "Singularity Alpha", "Void Omega", "Grand Architect", "Universal Constant",
-  "Beyond Existence", "Timeless", "Outer God", "Multiversal", "Omniversal", "The Zenith", "Apex Predestined", "Final Paradox", "The Absolute", "True Entity"
-];
-
-
-const roundFinancial = (value) => Math.round(value * 10_000) / 10_000;
-
-function getTier(index) {
-  const progress = index / (ALIEN_NAMES.length - 1);
-
-  /*
-   * Early tiers contain more aliens.
-   * Endgame tiers become increasingly exclusive.
-   */
-  const tierProgress = Math.pow(progress, 1.35);
-
-  const tierIndex = Math.min(
-    TIER_NAMES.length - 1,
-    Math.floor(tierProgress * TIER_NAMES.length)
-  );
-
-  return TIER_NAMES[tierIndex];
-}
-
-function rarityDenominator(index) {
-  const progress = index / (ALIEN_NAMES.length - 1);
-
-  return Math.max(
-    2,
-    Math.round(
-      2 * Math.pow(
-        50_000_000_000_000 / 2,
-        progress ** 0.85
-      )
-    )
-  );
-}
-
-function rarityColor(denominator) {
-  const rarity = Math.log10(Math.max(2, denominator));
-
-  if (rarity < 1) {
-    return "hsl(0 0% 68%)";       // Common
-  }
-
-  if (rarity < 2) {
-    return "hsl(120 65% 55%)";    // Uncommon
-  }
-
-  if (rarity < 4) {
-    return "hsl(210 85% 62%)";    // Rare
-  }
-
-  if (rarity < 6) {
-    return "hsl(270 80% 68%)";    // Epic
-  }
-
-  if (rarity < 8) {
-    return "hsl(35 90% 60%)";     // Legendary
-  }
-
-  if (rarity < 10) {
-    return "hsl(320 85% 65%)";    // Mythical
-  }
-
-  if (rarity < 12) {
-    return "hsl(0 85% 62%)";      // Godlike
-  }
-
-  if (rarity < 13) {
-    return "hsl(185 90% 65%)";    // Cosmic
-  }
-
-  return "hsl(45 100% 75%)";      // Absolute
-}
-
-const ALIENS = ALIEN_NAMES.map((name, index) => {
-  const denominator = rarityDenominator(index);
-  const rarity = 1 / denominator;
-
-  const moneyPerSec =
-    0.15 * Math.pow(denominator, 0.65);
-
-  return Object.freeze({
-    id: `alien_${String(index + 1).padStart(3, "0")}`,
-    name,
-    tier: getTier(index),
-    icon: ALIEN_ICONS[index % ALIEN_ICONS.length],
-    color: rarityColor(denominator),
-    rarity,
-    rarityDenominator: denominator,
-    money_per_sec: roundFinancial(moneyPerSec)
+function normalizePlaced(input, now) {
+  const source = Array.isArray(input) ? input : [];
+  const normalized = source.slice(0, 12).map((slot) => {
+    const id = slot?.alien_id || slot?.alienId;
+    const plusLevel = bounded(integer(slot?.plus_level ?? slot?.plusLevel, 0), 0, 3);
+    return ALIEN_BY_ID.has(id) ? { alienId: id, plusLevel, lastCollected: bounded(number(slot?.last_collected ?? slot?.lastCollected, now), 0, now) } : null;
   });
-});
-
-const ALIEN_BY_ID = new Map(ALIENS.map((alien) => [alien.id, alien]));
-
-const UPGRADE_CONFIG = Object.freeze({
-  luck_boost: { label: "Luck Boost", description: "Tilts the roll table toward rarer aliens.", baseBonus: 0.10, unit: "luck" },
-  rolling_speed: { label: "Rolling Speed", description: "Shortens the dice materialization animation.", baseBonus: 0.08, unit: "speed" },
-  money_increase: { label: "Money Increase", description: "Raises earnings from every placed alien.", baseBonus: 0.10, unit: "yield" }
-});
-
-const TEMPORARY_LUCK_CONFIG = Object.freeze({
-  durationMs: 60 * 1000,
-  maxMoney: MAX_MONEY
-});
-
-function temporaryLuckFromMoney(amount) {
-  const money = Math.min(
-    TEMPORARY_LUCK_CONFIG.maxMoney,
-    Math.max(0, Number(amount) || 0)
-  );
-
-  if (money <= 0) {
-    return 0;
-  }
-
-  if (money <= 1_000_000) {
-    return roundFinancial(
-      10 * Math.pow(money / 1_000_000, 0.35)
-    );
-  }
-
-  return roundFinancial(
-    10 * Math.pow(money / 1_000_000, 0.27)
-  );
+  while (normalized.length < TEAM_SLOT_COUNT) normalized.push(null);
+  return normalized;
 }
-
-function initialDatabase() {
-  return { users: {} };
+function normalizeDiscovered(input, inventory, placed) {
+  const found = {};
+  const source = Array.isArray(input) ? input : input && typeof input === "object" ? Object.keys(input) : [];
+  for (const id of source) if (ALIEN_BY_ID.has(id)) found[id] = true;
+  for (const key of Object.keys(inventory)) { const parsed = parseStackKey(key); if (parsed) found[parsed.alienId] = true; }
+  for (const slot of placed) if (slot) found[slot.alienId] = true;
+  return found;
 }
-
-let database = initialDatabase();
-let databaseBusy = false;
-const databaseQueue = [];
-
-async function initializeDatabase() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      money NUMERIC NOT NULL,
-      total_rolls INTEGER NOT NULL,
-      shop_purchases JSONB NOT NULL,
-      inventory JSONB NOT NULL,
-      placed_aliens JSONB NOT NULL,
-      temporary_luck NUMERIC NOT NULL DEFAULT 0,
-      temporary_luck_expires_at NUMERIC NOT NULL DEFAULT 0
-    )
-  `);
-
-  await pool.query(`
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS temporary_luck NUMERIC NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS temporary_luck_expires_at NUMERIC NOT NULL DEFAULT 0
-  `);
-
-  const countResult = await pool.query(
-    "SELECT COUNT(*)::int AS count FROM users"
-  );
-
-  const databaseIsEmpty = countResult.rows[0].count === 0;
-
-  /*
-   * One-time migration from data.json.
-   *
-   * We intentionally keep data.json untouched as a backup.
-   */
-  if (databaseIsEmpty && fs.existsSync(DATA_FILE)) {
-    try {
-      const parsed = JSON.parse(
-        fs.readFileSync(DATA_FILE, "utf8")
-      );
-
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        parsed.users &&
-        typeof parsed.users === "object" &&
-        !Array.isArray(parsed.users)
-      ) {
-        const users = Object.entries(parsed.users);
-
-        if (users.length > 0) {
-          console.log(
-            `Migrating ${users.length} player(s) from data.json to PostgreSQL...`
-          );
-
-          const client = await pool.connect();
-
-          try {
-            await client.query("BEGIN");
-
-            for (const [id, user] of users) {
-              if (!validatePlayer(user)) {
-                console.warn(
-                  `Skipping invalid player ${id} during migration.`
-                );
-                continue;
-              }
-
-              await client.query(
-                `
-                  INSERT INTO users (
-                    id,
-                    name,
-                    password,
-                    money,
-                    total_rolls,
-                    shop_purchases,
-                    inventory,
-                    placed_aliens
-                  )
-                  VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)
-                  ON CONFLICT (id) DO NOTHING
-                `,
-                [
-                  id,
-                  user.name,
-                  user.password,
-                  user.money,
-                  user.total_rolls,
-                  JSON.stringify(user.shop_purchases),
-                  JSON.stringify(user.inventory),
-                  JSON.stringify(user.placed_aliens)
-                ]
-              );
-            }
-
-            await client.query("COMMIT");
-
-            console.log("data.json migration completed.");
-          } catch (error) {
-            await client.query("ROLLBACK");
-            throw error;
-          } finally {
-            client.release();
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Failed to migrate data.json:", error);
-      throw error;
-    }
-  }
-
-  await loadDatabaseFromPostgres();
-
-  console.log(
-    `PostgreSQL database ready. Loaded ${Object.keys(database.users).length} player(s).`
-  );
+function normalizeSettings(input) {
+  return { rollingAnimation: input?.rollingAnimation !== false, fullDiscovery: input?.fullDiscovery !== false };
 }
-
-async function loadDatabaseFromPostgres() {
-  const result = await pool.query(`
-    SELECT 
-      id, 
-      name, 
-      password, 
-      money, 
-      total_rolls, 
-      shop_purchases, 
-      inventory, 
-      placed_aliens,
-      temporary_luck, 
-      temporary_luck_expires_at
-    FROM users
-  `);
-
-  database = initialDatabase();
-
-  for (const row of result.rows) {
-    const user = {
-      name: row.name,
-      password: row.password,
-      money: Number(row.money),
-      total_rolls: Number(row.total_rolls),
-      shop_purchases: row.shop_purchases,
-      inventory: row.inventory,
-      placed_aliens: row.placed_aliens,
-      temporary_luck: Number(row.temporary_luck),
-      temporary_luck_expires_at: Number(row.temporary_luck_expires_at)
-    };
-
-    if (!validatePlayer(user)) {
-      console.warn(
-        `Skipping invalid player ${row.id} loaded from PostgreSQL.`
-      );
-      continue;
-    }
-
-    database.users[row.id] = user;
-  }
+function normalizePlayer(source, now = Date.now()) {
+  if (!source || typeof source.name !== "string" || typeof source.password !== "string") return null;
+  const inventory = normalizeInventory(source.inventory);
+  const placedAliens = normalizePlaced(source.placed_aliens ?? source.placedAliens, now);
+  const discoveredAlienIds = normalizeDiscovered(source.discovered_aliens ?? source.discoveredAlienIds, inventory, placedAliens);
+  const upgrades = source.upgrades || source.shop_purchases || {};
+  const stats = source.stats || {};
+  return {
+    name: source.name.trim().replace(/\s+/g, " "), password: source.password,
+    money: bounded(balance.roundGame(number(source.money)), 0, MAX_MONEY), totalRolls: Math.max(0, integer(source.total_rolls ?? source.totalRolls)),
+    upgrades: { luck: Math.max(0, integer(upgrades.luck ?? upgrades.luck_boost)), speed: Math.max(0, integer(upgrades.speed ?? upgrades.rolling_speed)), coin: Math.max(0, integer(upgrades.coin ?? upgrades.money_increase)) },
+    diceCount: bounded(integer(source.dice_count ?? source.diceCount, 1), 1, balance.MAX_DICE),
+    pendingLuck: bounded(number(source.pending_luck ?? source.pendingLuck ?? source.temporary_luck), 0, 1e12),
+    inventory, placedAliens, discoveredAlienIds,
+    avatarAlienId: ALIEN_BY_ID.has(source.avatar_alien_id ?? source.avatarAlienId) ? (source.avatar_alien_id ?? source.avatarAlienId) : Object.keys(discoveredAlienIds)[0] || null,
+    autoRollActive: Boolean(source.auto_roll_active ?? source.autoRollActive), autoRollTouchedAt: number(source.auto_roll_touched_at ?? source.autoRollTouchedAt), lastRollAt: number(source.last_roll_at ?? source.lastRollAt), lastSeenAt: bounded(number(source.last_seen_at ?? source.lastSeenAt, now), 0, now),
+    settings: normalizeSettings(source.game_settings ?? source.settings), activeSessionId: typeof (source.active_session_id ?? source.activeSessionId) === "string" ? (source.active_session_id ?? source.activeSessionId) : null,
+    mutationVersion: Math.max(0, integer(source.mutation_version ?? source.mutationVersion)), lastMutationId: typeof (source.last_mutation_id ?? source.lastMutationId) === "string" ? (source.last_mutation_id ?? source.lastMutationId) : null,
+    lastMutationResponse: source.last_mutation_response ?? source.lastMutationResponse ?? null,
+    stats: { createdAt: bounded(number(stats.created_at ?? stats.createdAt, now), 0, now), playtimeSeconds: Math.max(0, number(stats.playtime_seconds ?? stats.playtimeSeconds)), totalMoneyEarned: Math.max(0, balance.roundGame(number(stats.total_money_earned ?? stats.totalMoneyEarned))) }
+  };
 }
-
-async function persistDatabase(userIds = Object.keys(database.users)) {
-  if (userIds.length === 0) {
-    return;
-  }
-
+function newPlayer(name, password) {
+  const now = Date.now();
+  return normalizePlayer({ name, password, money: 650, upgrades: {}, diceCount: 1, inventory: {}, placedAliens: Array(TEAM_SLOT_COUNT).fill(null), discoveredAlienIds: {}, pendingLuck: 0, autoRollActive: false, lastSeenAt: now, settings: {}, stats: { createdAt: now } }, now);
+}
+function writePlayer(client, id, player) {
+  return client.query(`INSERT INTO users (id, name, password, money, total_rolls, shop_purchases, inventory, placed_aliens, discovered_aliens, avatar_alien_id, next_roll_luck_multiplier, auto_roll_active, auto_roll_touched_at, last_roll_at, last_seen_at, stats, pending_luck, dice_count, game_settings, active_session_id, mutation_version, last_mutation_id, last_mutation_response)
+    VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10,1,$11,$12,$13,$14,$15::jsonb,$16,$17,$18::jsonb,$19,$20,$21,$22::jsonb)
+    ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,password=EXCLUDED.password,money=EXCLUDED.money,total_rolls=EXCLUDED.total_rolls,shop_purchases=EXCLUDED.shop_purchases,inventory=EXCLUDED.inventory,placed_aliens=EXCLUDED.placed_aliens,discovered_aliens=EXCLUDED.discovered_aliens,avatar_alien_id=EXCLUDED.avatar_alien_id,auto_roll_active=EXCLUDED.auto_roll_active,auto_roll_touched_at=EXCLUDED.auto_roll_touched_at,last_roll_at=EXCLUDED.last_roll_at,last_seen_at=EXCLUDED.last_seen_at,stats=EXCLUDED.stats,pending_luck=EXCLUDED.pending_luck,dice_count=EXCLUDED.dice_count,game_settings=EXCLUDED.game_settings,active_session_id=EXCLUDED.active_session_id,mutation_version=EXCLUDED.mutation_version,last_mutation_id=EXCLUDED.last_mutation_id,last_mutation_response=EXCLUDED.last_mutation_response`,
+  [id, player.name, player.password, player.money, player.totalRolls, JSON.stringify(player.upgrades), JSON.stringify(player.inventory), JSON.stringify(player.placedAliens), JSON.stringify(player.discoveredAlienIds), player.avatarAlienId, player.autoRollActive, player.autoRollTouchedAt, player.lastRollAt, player.lastSeenAt, JSON.stringify({ created_at: player.stats.createdAt, playtime_seconds: player.stats.playtimeSeconds, total_money_earned: player.stats.totalMoneyEarned }), player.pendingLuck, player.diceCount, JSON.stringify(player.settings), player.activeSessionId, player.mutationVersion, player.lastMutationId, JSON.stringify(player.lastMutationResponse)]);
+}
+async function persistPlayers(ids, deleteTradeRoomId = null) {
+  const unique = [...new Set(ids)].filter((id) => state.users[id]);
+  if (!unique.length) return;
   const client = await pool.connect();
+  try { await client.query("BEGIN"); for (const id of unique) await writePlayer(client, id, state.users[id]); if (deleteTradeRoomId) await client.query("DELETE FROM trade_rooms WHERE id=$1", [deleteTradeRoomId]); await client.query("COMMIT"); }
+  catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+}
+async function persistTradeRoom(room) {
+  await pool.query(`INSERT INTO trade_rooms (id,inviter_id,members,status,offers,confirmed,expires_at) VALUES ($1,$2,$3::jsonb,$4,$5::jsonb,$6::jsonb,$7)
+    ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,offers=EXCLUDED.offers,confirmed=EXCLUDED.confirmed,expires_at=EXCLUDED.expires_at`, [room.id, room.inviterId, JSON.stringify(room.members), room.status, JSON.stringify(room.offers), JSON.stringify(room.confirmed), room.expiresAt]);
+}
+async function removeTradeRoom(id) { await pool.query("DELETE FROM trade_rooms WHERE id=$1", [id]); }
+async function initializeDatabase() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, password TEXT NOT NULL, money NUMERIC NOT NULL, total_rolls BIGINT NOT NULL, shop_purchases JSONB NOT NULL, inventory JSONB NOT NULL, placed_aliens JSONB NOT NULL, discovered_aliens JSONB NOT NULL DEFAULT '{}'::jsonb, avatar_alien_id TEXT, next_roll_luck_multiplier NUMERIC NOT NULL DEFAULT 1, auto_roll_active BOOLEAN NOT NULL DEFAULT FALSE, auto_roll_touched_at NUMERIC NOT NULL DEFAULT 0, last_roll_at NUMERIC NOT NULL DEFAULT 0, last_seen_at NUMERIC NOT NULL DEFAULT 0, stats JSONB NOT NULL DEFAULT '{}'::jsonb)`);
+  for (const column of ["pending_luck NUMERIC NOT NULL DEFAULT 0", "dice_count INTEGER NOT NULL DEFAULT 1", "game_settings JSONB NOT NULL DEFAULT '{\"rollingAnimation\":true,\"fullDiscovery\":true}'::jsonb", "active_session_id TEXT", "mutation_version BIGINT NOT NULL DEFAULT 0", "last_mutation_id TEXT", "last_mutation_response JSONB"]) await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${column}`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS game_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, csrf_token TEXT NOT NULL, expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL)`);
+  await pool.query("CREATE INDEX IF NOT EXISTS game_sessions_user_id_idx ON game_sessions(user_id)");
+  await pool.query(`CREATE TABLE IF NOT EXISTS trade_rooms (id TEXT PRIMARY KEY, inviter_id TEXT NOT NULL, members JSONB NOT NULL, status TEXT NOT NULL, offers JSONB NOT NULL DEFAULT '{}'::jsonb, confirmed JSONB NOT NULL DEFAULT '[]'::jsonb, expires_at BIGINT NOT NULL)`);
+  const result = await pool.query("SELECT * FROM users");
+  state.users = {};
+  for (const row of result.rows) { const player = normalizePlayer(row); if (player) state.users[row.id] = player; }
+  await pool.query("DELETE FROM game_sessions WHERE expires_at < $1", [Date.now()]);
+  await pool.query("DELETE FROM trade_rooms WHERE expires_at < $1 OR status='completed'", [Date.now()]);
+  const rooms = await pool.query("SELECT * FROM trade_rooms WHERE expires_at >= $1 AND status IN ('invited','accepted')", [Date.now()]);
+  for (const row of rooms.rows) {
+    const members = Array.isArray(row.members) ? row.members : [];
+    if (members.length === 2 && members.every((id) => state.users[id])) state.tradeRooms.set(row.id, { id: row.id, inviterId: row.inviter_id, members, status: row.status, offers: row.offers || {}, confirmed: Array.isArray(row.confirmed) ? row.confirmed : [], expiresAt: number(row.expires_at) });
+  }
+  console.log(`Game database ready: ${Object.keys(state.users).length} player(s), ${CATALOG_SIZE.toLocaleString()} catalog entries.`);
+}
 
+function withLock(work) { return new Promise((resolve, reject) => { state.queue.push({ work, resolve, reject }); drainLock(); }); }
+async function drainLock() { if (state.busy || !state.queue.length) return; state.busy = true; const job = state.queue.shift(); try { job.resolve(await job.work()); } catch (error) { job.reject(error); } finally { state.busy = false; queueMicrotask(drainLock); } }
+function passwordHash(password, salt = crypto.randomBytes(16).toString("base64url")) { return `${salt}:${crypto.scryptSync(password, salt, 64).toString("base64url")}`; }
+function passwordMatches(password, stored) { const [salt, digest] = String(stored).split(":"); if (!salt || !digest) return false; const a = crypto.scryptSync(password, salt, 64); const b = Buffer.from(digest, "base64url"); return a.length === b.length && crypto.timingSafeEqual(a, b); }
+function parseCookies(header = "") { return Object.fromEntries(header.split(";").map((part) => { const index = part.indexOf("="); return index < 0 ? [] : [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())]; }).filter(Boolean)); }
+function setCookie(response, token) { response.cookie(SESSION_COOKIE, token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", maxAge: SESSION_TTL_MS, path: "/" }); }
+function clearCookie(response) { response.clearCookie(SESSION_COOKIE, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/" }); }
+async function issueSession(userId) {
+  const player = state.users[userId]; const token = crypto.randomBytes(32).toString("base64url"); const session = { id: crypto.randomUUID(), userId, tokenHash: hashToken(token), csrfToken: crypto.randomBytes(24).toString("base64url"), expiresAt: Date.now() + SESSION_TTL_MS };
+  const client = await pool.connect();
+  try { await client.query("BEGIN"); player.activeSessionId = session.id; await writePlayer(client, userId, player); await client.query("DELETE FROM game_sessions WHERE user_id=$1", [userId]); await client.query("INSERT INTO game_sessions (id,user_id,token_hash,csrf_token,expires_at,created_at) VALUES ($1,$2,$3,$4,$5,$6)", [session.id, userId, session.tokenHash, session.csrfToken, session.expiresAt, Date.now()]); await client.query("COMMIT"); }
+  catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  for (const [oldToken, old] of state.sessions) if (old.userId === userId) state.sessions.delete(oldToken);
+  state.sessions.set(token, session); return { token, session };
+}
+async function requireSession(request, response, next) {
   try {
-    await client.query("BEGIN");
-
-    for (const id of userIds) {
-      const user = database.users[id];
-
-      if (!user) {
-        continue;
-      }
-
-      await client.query(
-        `
-          INSERT INTO users (
-            id,
-            name,
-            password,
-            money,
-            total_rolls,
-            shop_purchases,
-            inventory,
-            placed_aliens,
-            temporary_luck,
-            temporary_luck_expires_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10)
-          ON CONFLICT (id)
-          DO UPDATE SET
-            name = EXCLUDED.name,
-            password = EXCLUDED.password,
-            money = EXCLUDED.money,
-            total_rolls = EXCLUDED.total_rolls,
-            shop_purchases = EXCLUDED.shop_purchases,
-            inventory = EXCLUDED.inventory,
-            placed_aliens = EXCLUDED.placed_aliens,
-            temporary_luck = EXCLUDED.temporary_luck,
-            temporary_luck_expires_at = EXCLUDED.temporary_luck_expires_at
-        `,
-        [
-          id,
-          user.name,
-          user.password,
-          user.money,
-          user.total_rolls,
-          JSON.stringify(user.shop_purchases),
-          JSON.stringify(user.inventory),
-          JSON.stringify(user.placed_aliens),
-          Number(user.temporary_luck) || 0,
-          Number(user.temporary_luck_expires_at) || 0
-        ]
-      );
+    const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]; if (!token) return response.status(401).json({ error: "Your session has expired. Please sign in again." });
+    let session = state.sessions.get(token);
+    if (!session) {
+      const result = await pool.query("SELECT id,user_id,token_hash,csrf_token,expires_at FROM game_sessions WHERE token_hash=$1", [hashToken(token)]);
+      const row = result.rows[0]; if (row && number(row.expires_at) > Date.now()) { session = { id: row.id, userId: row.user_id, tokenHash: row.token_hash, csrfToken: row.csrf_token, expiresAt: number(row.expires_at) }; state.sessions.set(token, session); }
     }
-
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+    const player = session && state.users[session.userId];
+    if (!session || !player || session.expiresAt < Date.now() || player.activeSessionId !== session.id) { state.sessions.delete(token); return response.status(401).json({ error: "Your session has expired. Please sign in again." }); }
+    request.userId = session.userId; request.sessionToken = token; request.session = session; return next();
+  } catch (error) { return next(error); }
 }
+function requireSameOrigin(request, response, next) { const origin = request.get("origin"); if (!origin) return next(); try { if (new URL(origin).host !== request.get("host")) return response.status(403).json({ error: "Cross-site requests are not allowed." }); } catch { return response.status(403).json({ error: "Invalid request origin." }); } return next(); }
+function requireJson(request, response, next) { return request.is("application/json") ? next() : response.status(415).json({ error: "Requests must use application/json." }); }
+function requireCsrf(request, response, next) { const supplied = request.get("x-csrf-token"); const expected = request.session?.csrfToken; if (!supplied || !expected) return response.status(403).json({ error: "Security token is missing. Refresh and try again." }); const a = Buffer.from(supplied); const b = Buffer.from(expected); return a.length === b.length && crypto.timingSafeEqual(a, b) ? next() : response.status(403).json({ error: "Security token is invalid. Refresh and try again." }); }
+function withinRate(bucket, userId) { const [maximum, windowMs] = RATE_LIMITS[bucket] || [30, 60_000]; const key = `${bucket}:${userId}`; const now = Date.now(); const list = (state.requests.get(key) || []).filter((stamp) => stamp > now - windowMs); if (list.length >= maximum) return false; list.push(now); state.requests.set(key, list); return true; }
+function rate(bucket) { return (request, response, next) => withinRate(bucket, request.userId) ? next() : response.status(429).json({ error: "Too many requests. Wait a moment and try again." }); }
 
-let databasePersisting = false;
-let databasePersistQueued = false;
+function activeAutoRoll(player, now = Date.now()) { if (!player.autoRollActive) return false; if (now - player.autoRollTouchedAt < 65_000) return true; player.autoRollActive = false; return false; }
+function permanentLuck(player) { return balance.luckMultiplier(player.upgrades.luck); }
+function effectiveLuck(player) { return balance.roundGame(permanentLuck(player) * (1 + player.pendingLuck)); }
+function totalIncome(player, now = Date.now()) { const income = player.placedAliens.reduce((sum, slot) => sum + (slot ? balance.incomeFor(ALIEN_BY_ID.get(slot.alienId), slot.plusLevel, player.upgrades.coin) : 0), 0); return balance.roundGame(income * (activeAutoRoll(player, now) ? balance.AUTO_ROLL_INCOME_MULTIPLIER : 1)); }
+function applyIncome(player, now = Date.now()) { const seconds = bounded((now - player.lastSeenAt) / 1000, 0, MAX_OFFLINE_SECONDS); player.lastSeenAt = now; if (!seconds) return 0; const earned = Math.min(MAX_MONEY - player.money, totalIncome(player, now) * seconds); player.money = balance.roundGame(player.money + earned); player.stats.totalMoneyEarned = balance.roundGame(player.stats.totalMoneyEarned + earned); player.stats.playtimeSeconds = balance.roundGame(player.stats.playtimeSeconds + Math.min(seconds, 90)); return earned; }
+function addStack(player, alienId, plusLevel = 0, amount = 1) { const key = stackKey(alienId, plusLevel); const before = integer(player.inventory[key]); if (!ALIEN_BY_ID.has(alienId) || before < 0 || amount < 1 || before > MAX_INVENTORY_STACK - amount) return false; player.inventory[key] = before + amount; return true; }
+function removeStack(player, alienId, plusLevel, amount) { const key = stackKey(alienId, plusLevel); const before = integer(player.inventory[key]); if (before < amount || amount < 1) return false; if (before === amount) delete player.inventory[key]; else player.inventory[key] = before - amount; return true; }
+function inventoryStacks(player) { return Object.entries(player.inventory).map(([key, count]) => { const parsed = parseStackKey(key); return parsed && publicStack(parsed.alienId, parsed.plusLevel, count, player.upgrades.coin); }).filter(Boolean).sort(compareStacks); }
+function topAlien(player) { return Object.keys(player.discoveredAlienIds).map((id) => ALIEN_BY_ID.get(id)).filter(Boolean).sort((a, b) => b.baseChanceLog - a.baseChanceLog)[0] || null; }
+function statsFor(player) { const rarest = topAlien(player); return { rolls: player.totalRolls, bestRarity: rarest?.rarity || "—", rarestAlien: publicAlien(rarest), coinsEarned: player.stats.totalMoneyEarned, currentLuck: effectiveLuck(player), permanentLuck: permanentLuck(player), collection: Object.keys(player.discoveredAlienIds).length, collectionTotal: CATALOG_SIZE, playtimeSeconds: player.stats.playtimeSeconds }; }
+function gameStateFor(userId) { const player = state.users[userId]; const now = Date.now(); const upgrades = Object.fromEntries(Object.keys(balance.UPGRADE_DEFINITIONS).map((key) => [key, balance.upgradeSnapshot(key, player.upgrades[key]) ])); return { catalogVersion: REGISTRY_VERSION, player: { name: player.name, money: player.money, totalRolls: player.totalRolls, diceCount: player.diceCount, teamSlots: player.placedAliens.length, placedAliens: player.placedAliens.map((slot) => slot && publicStack(slot.alienId, slot.plusLevel, 1, player.upgrades.coin)), incomePerSecond: totalIncome(player, now), autoRollActive: activeAutoRoll(player, now), rollAnimationMs: balance.rollAnimationDuration(player.upgrades.speed), pendingLuck: player.pendingLuck, currentLuck: effectiveLuck(player), permanentLuck: permanentLuck(player), settings: player.settings, upgrades, diceCost: balance.diceCost(player.diceCount), stats: statsFor(player) } }; }
+function recordMutation(player, id, payload) { if (!id) return; player.lastMutationId = id; player.lastMutationResponse = payload; player.mutationVersion += 1; }
+async function mutate(userId, id, work) { return withLock(async () => { const player = state.users[userId]; if (!player) throw new Error("Player record disappeared."); if (id && player.lastMutationId === id && player.lastMutationResponse) return player.lastMutationResponse; applyIncome(player); const payload = await work(player); recordMutation(player, id, payload); await persistPlayers([userId]); return payload; }); }
 
-function withDatabaseLock(work) {
-  return new Promise((resolve, reject) => {
-    databaseQueue.push({ work, resolve, reject });
-    drainDatabaseQueue();
-  });
+function distributionFor(luck) {
+  const exponent = balance.luckExponent(luck); const key = exponent.toFixed(6); const existing = state.distributionCache.get(key); if (existing) return existing;
+  const prefix = new Float64Array(ALIENS.length); let total = 0;
+  for (let i = 0; i < ALIENS.length; i += 1) { total += 10 ** (-ALIENS[i].baseChanceLog * exponent); prefix[i] = total; }
+  const distribution = { prefix, total, exponent }; if (state.distributionCache.size > 120) state.distributionCache.delete(state.distributionCache.keys().next().value); state.distributionCache.set(key, distribution); return distribution;
 }
-
-function scheduleDatabasePersist() {
-  if (databasePersistQueued) {
-    return;
-  }
-
-  databasePersistQueued = true;
-
-  queueMicrotask(async () => {
-    databasePersistQueued = false;
-
-    if (databasePersisting) {
-      return;
-    }
-
-    databasePersisting = true;
-
-    try {
-      await persistDatabase();
-    } catch (error) {
-      console.error("Background database persistence failed:", error);
-    } finally {
-      databasePersisting = false;
-    }
-  });
-}
-
-async function drainDatabaseQueue() {
-  if (databaseBusy || databaseQueue.length === 0) {
-    return;
-  }
-
-  databaseBusy = true;
-  const job = databaseQueue.shift();
-
-  try {
-    const result = await job.work();
-
-    job.resolve(result);
-
-    scheduleDatabasePersist();
-  } catch (error) {
-    job.reject(error);
-  } finally {
-    databaseBusy = false;
-    queueMicrotask(drainDatabaseQueue);
-  }
-}
-
-function parseCookies(header = "") {
-  return Object.fromEntries(header.split(";").map((part) => {
-    const separator = part.indexOf("=");
-    if (separator < 0) return ["", ""];
-    return [part.slice(0, separator).trim(), decodeURIComponent(part.slice(separator + 1).trim())];
-  }).filter(([key]) => key));
-}
-
-const sessions = new Map();
-function createSession(userId) {
-  const token = crypto.randomBytes(32).toString("base64url");
-  sessions.set(token, { userId, expiresAt: Date.now() + SESSION_TTL_MS });
-  return token;
-}
-
-function setSessionCookie(response, token) {
-  response.cookie(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: SESSION_TTL_MS,
-    path: "/"
-  });
-}
-
-function clearSessionCookie(response) {
-  response.clearCookie(SESSION_COOKIE, { httpOnly: true, sameSite: "strict", path: "/" });
-}
-
-function requireSession(request, response, next) {
-  const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
-  const session = token && sessions.get(token);
-  if (!session || session.expiresAt < Date.now() || !database.users[session.userId]) {
-    if (token) sessions.delete(token);
-    return response.status(401).json({ error: "Your session has expired. Please sign in again." });
-  }
-  request.userId = session.userId;
-  request.sessionToken = token;
-  return next();
-}
-
-function requireSameOrigin(request, response, next) {
-  const origin = request.get("origin");
-  if (origin) {
-    try {
-      if (new URL(origin).host !== request.get("host")) {
-        return response.status(403).json({ error: "Cross-site requests are not allowed." });
-      }
-    } catch {
-      return response.status(403).json({ error: "Invalid request origin." });
-    }
-  }
-  return next();
-}
-
-function passwordHash(password, salt = crypto.randomBytes(16).toString("base64url")) {
-  const digest = crypto.scryptSync(password, salt, 64).toString("base64url");
-  return `${salt}:${digest}`;
-}
-
-function passwordMatches(password, stored) {
-  const [salt, digest] = String(stored).split(":");
-  if (!salt || !digest) return false;
-  const expected = Buffer.from(digest, "base64url");
-  const actual = crypto.scryptSync(password, salt, 64);
-  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-}
-
-function getSlotCount(player) {
-  return Math.max(1, player.placed_aliens.length);
-}
-
-function upgradeCost(level) {
-  return roundFinancial(50 * (1.4 ** level));
-}
-
-function nextUpgradeBonus(key, level) {
-  if (key === "rolling_speed") return 1 - (0.96 ** (level + 1));
-  return UPGRADE_CONFIG[key].baseBonus * (1.1 ** level);
-}
-
-function totalUpgradeBonus(key, level) {
-  let total = 0;
-  for (let index = 0; index < level; index += 1) total += nextUpgradeBonus(key, index);
-  return total;
-}
-
-function effectiveAlienRate(player, alien) {
-  const yieldBonus = totalUpgradeBonus("money_increase", player.shop_purchases.money_increase);
-  return roundFinancial(alien.money_per_sec * (1 + yieldBonus));
-}
-
-function totalMoneyPerSecond(player) {
-  return roundFinancial(player.placed_aliens.reduce((sum, slot) => {
-    const alien = slot && ALIEN_BY_ID.get(slot.alien_id);
-    return sum + (alien ? effectiveAlienRate(player, alien) : 0);
-  }, 0));
-}
-
-function rollAnimationDuration(player) {
-  const level = player.shop_purchases.rolling_speed;
-  const speedMultiplier = 0.96 ** level;
-  return Math.max(100, Math.round(BASE_ROLL_ANIMATION_MS * speedMultiplier));
-}
-
-/* Placement records carry their collection timestamp, preserving the required player shape. */
-function applyPassiveIncome(player, now = Date.now()) {
-  let generated = 0;
-  for (const slot of player.placed_aliens) {
-    if (!slot || !ALIEN_BY_ID.has(slot.alien_id)) continue;
-    const previous = Number(slot.last_collected);
-    slot.last_collected = now;
-    if (!Number.isFinite(previous) || previous > now) continue;
-    generated += ((now - previous) / 1000) * effectiveAlienRate(player, ALIEN_BY_ID.get(slot.alien_id));
-  }
-  if (generated > 0) player.money = Math.min(MAX_MONEY, roundFinancial(player.money + generated));
-  return roundFinancial(generated);
-}
-
-function publicCatalog() {
-  return ALIENS.map(({
-    id,
-    name,
-    tier,
-    icon,
-    color,
-    rarity,
-    rarityDenominator,
-    money_per_sec
-  }) => ({
-    id,
-    name,
-    tier,
-    icon,
-    color,
-    rarity,
-    rarityDenominator,
-    money_per_sec
-  }));
-}
-
-function leaderboardFor(activeUserId) {
-  const rows = Object.entries(database.users).map(([id, user]) => ({
-    id,
-    name: user.name,
-    money: roundFinancial(user.money),
-    total_rolls: user.total_rolls
-  })).sort((a, b) => b.money - a.money || b.total_rolls - a.total_rolls || a.name.localeCompare(b.name));
-  const activeRank = rows.findIndex((row) => row.id === activeUserId) + 1;
-  const top = rows.slice(0, 10).map((row, index) => ({ ...row, rank: index + 1 }));
-  const active = rows[activeRank - 1];
-  if (activeRank > 10 && active) top.push({ ...active, rank: activeRank, isCurrentPlayer: true });
-  return { rows: top.map(({ id, ...row }) => row), activeRank };
-}
-
-function gameStateFor(userId) {
-  const player = database.users[userId];
-  const slots = getSlotCount(player);
-  const placedAliens = Array.from({ length: slots }, (_, index) => {
-    const slot = player.placed_aliens[index];
-    const alien = slot && ALIEN_BY_ID.get(slot.alien_id);
-    return alien ? { ...alien, money_per_sec: effectiveAlienRate(player, alien) } : null;
-  });
-  const upgrades = Object.fromEntries(Object.keys(UPGRADE_CONFIG).map((key) => {
-    const level = player.shop_purchases[key];
-    return [key, {
-      ...UPGRADE_CONFIG[key],
-      level,
-      cost: upgradeCost(level),
-      nextBonus: nextUpgradeBonus(key, level),
-      totalBonus: totalUpgradeBonus(key, level)
-    }];
-  }));
-  return {
-    player: {
-      name: player.name,
-      money: roundFinancial(player.money),
-      total_rolls: player.total_rolls,
-      inventory: player.inventory,
-      placed_aliens: placedAliens,
-      slots,
-      nextSlotCost: 500 * (2 ** slots),
-      moneyPerSecond: totalMoneyPerSecond(player),
-      rollAnimationMs: rollAnimationDuration(player),
-      temporaryLuck: {
-        value:
-          Number(player.temporary_luck) > 0 &&
-          Number(player.temporary_luck_expires_at) > Date.now()
-            ? roundFinancial(player.temporary_luck)
-            : 0,
-        expiresAt:
-          Number(player.temporary_luck) > 0 &&
-          Number(player.temporary_luck_expires_at) > Date.now()
-            ? Number(player.temporary_luck_expires_at)
-            : 0
-      },
-      upgrades
-    },
-    catalog: publicCatalog(),
-    leaderboard: leaderboardFor(userId)
-  };
-}
-
-function pickAlien(player) {
-  const permanentLuck = Math.max(
-    0,
-    totalUpgradeBonus(
-      "luck_boost",
-      player.shop_purchases.luck_boost
-    )
-  );
-
-  const temporaryLuck =
-    Number(player.temporary_luck) > 0 &&
-    Number(player.temporary_luck_expires_at) > Date.now()
-      ? Number(player.temporary_luck)
-      : 1;
-
-  // Temporary Luck is a true multiplier.
-  // Example:
-  // 0 permanent + 10× temporary = 9 effective Luck
-  // 10% permanent + 10× temporary = 10× the normal luck effect.
-  const luck =
-    (1 + permanentLuck) * ((temporaryLuck - 1) * 0.025);
-
-  /*
-   * Luck changes the SHAPE of the rarity curve.
-   *
-   * 0 Luck:
-   *   exponent = 1
-   *   Original rarity distribution.
-   *
-   * More Luck:
-   *   exponent gets smaller.
-   *   Extremely rare aliens become dramatically more competitive.
-   *
-   * This intentionally allows extreme endgame Luck to destroy
-   * normal progression. That is the reward for reaching it.
-   */
-  const rarityExponent =
-    1 / Math.sqrt(1 + luck * 0.012, 1);
-
-  const weights = ALIENS.map((alien) => {
-    return Math.pow(alien.rarity, rarityExponent);
-  });
-
-  const weightTotal = weights.reduce(
-    (sum, weight) => sum + weight,
-    0
-  );
-
-  let roll =
-    crypto.randomInt(0, 1_000_000_000) /
-    1_000_000_000 *
-    weightTotal;
-
-  for (let index = 0; index < ALIENS.length; index += 1) {
-    roll -= weights[index];
-
-    if (roll <= 0 || index === ALIENS.length - 1) {
-      return {
-        alien: ALIENS[index],
-        chance: weights[index] / weightTotal,
-        rarityExponent
-      };
-    }
-  }
-
-  return {
-    alien: ALIENS[0],
-    chance: weights[0] / weightTotal,
-    rarityExponent
-  };
-}
-
-function validatePlayer(player) {
-  return player && typeof player === "object" && typeof player.name === "string" && typeof player.password === "string" &&
-    Number.isFinite(player.money) && player.money >= 0 && Number.isInteger(player.total_rolls) && player.total_rolls >= 0 && player.shop_purchases &&
-    Number.isInteger(player.shop_purchases.luck_boost) && player.shop_purchases.luck_boost >= 0 &&
-    Number.isInteger(player.shop_purchases.rolling_speed) && player.shop_purchases.rolling_speed >= 0 &&
-    Number.isInteger(player.shop_purchases.money_increase) && player.shop_purchases.money_increase >= 0 && player.inventory && typeof player.inventory === "object" && !Array.isArray(player.inventory) &&
-    Array.isArray(player.placed_aliens) &&
-    Number.isFinite(player.temporary_luck) &&
-    player.temporary_luck >= 0 &&
-    Number.isFinite(player.temporary_luck_expires_at) &&
-    player.temporary_luck_expires_at >= 0;
-}
+function pickAlien(luck) { const distribution = distributionFor(luck); const target = crypto.randomInt(1_000_000_000) / 1_000_000_000 * distribution.total; let low = 0; let high = ALIENS.length - 1; while (low < high) { const mid = (low + high) >> 1; if (target < distribution.prefix[mid]) high = mid; else low = mid + 1; } return ALIENS[low]; }
+function compareStacks(left, right) { return right.power - left.power || right.plusLevel - left.plusLevel || right.baseChanceLog - left.baseChanceLog || left.id.localeCompare(right.id); }
 
 app.disable("x-powered-by");
-app.use(express.json({ limit: "12kb", strict: true }));
-app.use((request, response, next) => {
-  response.set({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin" });
-  next();
-});
+app.use(express.json({ limit: "16kb", strict: true }));
+app.use((request, response, next) => { response.set({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin", "Permissions-Policy": "camera=(), microphone=(), geolocation=()", "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'" }); next(); });
 
-app.post("/api/login", requireSameOrigin, async (request, response, next) => {
+app.post("/api/login", requireSameOrigin, requireJson, async (request, response, next) => {
   try {
-    const username = typeof request.body?.username === "string" ? request.body.username.trim().replace(/\s+/g, " ") : "";
-    const password = typeof request.body?.password === "string" ? request.body.password : "";
-    if (username.length < 3 || username.length > 24 || /[\x00-\x1f]/.test(username)) return response.status(400).json({ error: "Username must be 3–24 printable characters." });
-    if (password.length < 4 || password.length > 128) return response.status(400).json({ error: "Password must be 4–128 characters." });
-
-    const result = await withDatabaseLock(() => {
-      const found = Object.entries(database.users).find(([, user]) => user.name.toLocaleLowerCase() === username.toLocaleLowerCase());
-      if (found) {
-        const [userId, user] = found;
-        if (!validatePlayer(user) || !passwordMatches(password, user.password)) return { ok: false, status: 401, error: "Incorrect username or password." };
-        applyPassiveIncome(user);
-        return { ok: true, userId, created: false };
-      }
-      const userId = crypto.randomUUID();
-      database.users[userId] = {
-        name: username,
-        password: passwordHash(password),
-        money: 50,
-        total_rolls: 0,
-        shop_purchases: { luck_boost: 0, rolling_speed: 0, money_increase: 0 },
-        inventory: {},
-        placed_aliens: [],
-        temporary_luck: 0,
-        temporary_luck_expires_at: 0
-      };
-      return { ok: true, userId, created: true };
-    });
-    if (!result.ok) return response.status(result.status).json({ error: result.error });
-    const token = createSession(result.userId);
-    setSessionCookie(response, token);
-    return response.status(result.created ? 201 : 200).json({ ...gameStateFor(result.userId), created: result.created });
-  } catch (error) {
-    return next(error);
-  }
+    if (!withinRate("login", request.ip)) return response.status(429).json({ error: "Too many login attempts. Wait a moment and try again." });
+    const username = typeof request.body?.username === "string" ? request.body.username.trim().replace(/\s+/g, " ") : ""; const password = typeof request.body?.password === "string" ? request.body.password : "";
+    if (username.length < 3 || username.length > 24 || /[\x00-\x1f]/.test(username) || password.length < 4 || password.length > 128) return response.status(400).json({ error: "Use a 3–24 character pilot name and a 4–128 character passcode." });
+    const login = await withLock(async () => { const found = Object.entries(state.users).find(([, player]) => player.name.toLocaleLowerCase() === username.toLocaleLowerCase()); let userId; let created = false; if (found) { [userId] = found; if (!passwordMatches(password, state.users[userId].password)) return { error: "Incorrect pilot name or passcode.", status: 401 }; applyIncome(state.users[userId]); } else { userId = crypto.randomUUID(); state.users[userId] = newPlayer(username, passwordHash(password)); created = true; } const issued = await issueSession(userId); return { userId, created, issued }; });
+    if (login.error) return response.status(login.status).json({ error: login.error }); setCookie(response, login.issued.token); return response.status(login.created ? 201 : 200).json({ ...gameStateFor(login.userId), csrfToken: login.issued.session.csrfToken, created: login.created });
+  } catch (error) { return next(error); }
 });
+app.get("/api/game-state", requireSession, async (request, response, next) => { try { const payload = await withLock(async () => { applyIncome(state.users[request.userId]); await persistPlayers([request.userId]); return gameStateFor(request.userId); }); response.json({ ...payload, csrfToken: request.session.csrfToken }); } catch (error) { next(error); } });
+app.get("/api/catalog", requireSession, (request, response) => { const offset = bounded(integer(request.query.offset), 0, CATALOG_SIZE); const limit = bounded(integer(request.query.limit, 80), 1, 120); const search = String(request.query.search || "").trim().toLowerCase(); const rarity = String(request.query.rarity || ""); const found = new Set(Object.keys(state.users[request.userId].discoveredAlienIds)); const filtered = ALIENS.filter((alien) => (!search || alien.name.toLowerCase().includes(search)) && (!rarity || alien.rarity === rarity)); const entries = filtered.slice(offset, offset + limit).map((alien) => ({ ...publicAlien(alien), discovered: found.has(alien.id) })); response.json({ entries, offset, nextOffset: offset + entries.length < filtered.length ? offset + entries.length : null, total: filtered.length, catalogTotal: CATALOG_SIZE }); });
+app.get("/api/inventory", requireSession, (request, response) => { const offset = bounded(integer(request.query.offset), 0, Number.MAX_SAFE_INTEGER); const limit = bounded(integer(request.query.limit, 60), 1, 100); const search = String(request.query.search || "").trim().toLowerCase(); const rarity = String(request.query.rarity || ""); const all = inventoryStacks(state.users[request.userId]).filter((entry) => (!search || entry.name.toLowerCase().includes(search)) && (!rarity || entry.rarity === rarity)); const entries = all.slice(offset, offset + limit); response.json({ entries, offset, nextOffset: offset + entries.length < all.length ? offset + entries.length : null, totalStacks: all.length, totalCopies: all.reduce((sum, entry) => sum + entry.count, 0) }); });
 
-app.get("/api/game-state", requireSession, async (request, response, next) => {
-  try {
-    const state = await withDatabaseLock(() => {
-      const player = database.users[request.userId];
-      if (!validatePlayer(player)) throw new Error("Stored player data has an invalid shape.");
-      applyPassiveIncome(player);
-      return gameStateFor(request.userId);
-    });
-    return response.json(state);
-  } catch (error) {
-    return next(error);
-  }
+app.post("/api/roll", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("roll"), async (request, response, next) => {
+  try { const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const now = Date.now(); const cooldown = Math.max(720, Math.round(balance.rollAnimationDuration(player.upgrades.speed) * 0.36)); if (now - player.lastRollAt < cooldown) return { ok: false, error: "Roll drive is still stabilizing.", state: gameStateFor(request.userId) }; const luck = effectiveLuck(player); const results = []; const discoveries = []; for (let die = 0; die < player.diceCount; die += 1) { const alien = pickAlien(luck); if (!addStack(player, alien.id, 0)) throw new Error("Inventory stack reached its safe maximum."); const isNew = !player.discoveredAlienIds[alien.id]; player.discoveredAlienIds[alien.id] = true; if (isNew) discoveries.push(publicAlien(alien)); results.push(publicAlien(alien)); } player.lastRollAt = now; if (player.autoRollActive) player.autoRollTouchedAt = now; player.totalRolls += player.diceCount; player.pendingLuck = 0; if (!player.avatarAlienId) player.avatarAlienId = results[0].id; const featured = [...results].sort((a, b) => b.baseChanceLog - a.baseChanceLog)[0]; const discovery = [...discoveries].sort((a, b) => b.baseChanceLog - a.baseChanceLog)[0] || null; return { ok: true, featured, results, discovery, newDiscoveries: discoveries, usedLuck: luck, state: gameStateFor(request.userId) }; }); return response.status(result.ok ? 200 : 429).json(result); } catch (error) { return next(error); }
 });
+app.post("/api/buy-upgrade", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("buy"), async (request, response, next) => { try { const key = request.body?.upgrade; if (!balance.UPGRADE_DEFINITIONS[key]) return response.status(400).json({ error: "Unknown upgrade." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const cost = balance.upgradeCost(key, player.upgrades[key]); if (player.money < cost) return { ok: false, error: "Not enough coins for that upgrade.", state: gameStateFor(request.userId) }; player.money = balance.roundGame(player.money - cost); player.upgrades[key] += 1; return { ok: true, state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 400).json(result); } catch (error) { next(error); } });
+app.post("/api/buy-dice", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("buy"), async (request, response, next) => { try { const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const cost = balance.diceCost(player.diceCount); if (!Number.isFinite(cost)) return { ok: false, error: "Your dice array is at its safe limit.", state: gameStateFor(request.userId) }; if (player.money < cost) return { ok: false, error: "Save more coins for this major milestone.", state: gameStateFor(request.userId) }; player.money = balance.roundGame(player.money - cost); player.diceCount += 1; return { ok: true, state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 400).json(result); } catch (error) { next(error); } });
+app.post("/api/sacrifice", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const items = Array.isArray(request.body?.items) ? request.body.items : []; if (!items.length || items.length > 60) return response.status(400).json({ error: "Select one to sixty valid inventory stacks." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const normalized = []; const seen = new Set(); for (const item of items) { const alienId = item?.alienId; const plusLevel = integer(item?.plusLevel); const quantity = integer(item?.quantity); const key = stackKey(alienId, plusLevel); if (!ALIEN_BY_ID.has(alienId) || plusLevel < 0 || plusLevel > 3 || quantity < 1 || quantity > MAX_INVENTORY_STACK || seen.has(key) || integer(player.inventory[key]) < quantity) return { ok: false, error: "Your sacrifice selection is no longer available.", state: gameStateFor(request.userId) }; seen.add(key); normalized.push({ alienId, plusLevel, quantity }); }
+      let gained = 0; for (const item of normalized) gained += balance.sacrificeLuck(ALIEN_BY_ID.get(item.alienId), item.plusLevel) * item.quantity; for (const item of normalized) removeStack(player, item.alienId, item.plusLevel, item.quantity); player.pendingLuck = bounded(balance.roundGame(player.pendingLuck + gained), 0, 1e12); return { ok: true, gained: balance.roundGame(gained), state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
+app.post("/api/merge", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const alienId = request.body?.alienId; const plusLevel = integer(request.body?.plusLevel); if (!ALIEN_BY_ID.has(alienId) || plusLevel < 0 || plusLevel >= 3) return response.status(400).json({ error: "That alien cannot be merged." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { if (!removeStack(player, alienId, plusLevel, 3)) return { ok: false, error: "You need exactly three matching copies in storage.", state: gameStateFor(request.userId) }; if (!addStack(player, alienId, plusLevel + 1)) throw new Error("Could not create shiny stack."); return { ok: true, merged: publicStack(alienId, plusLevel + 1, player.inventory[stackKey(alienId, plusLevel + 1)], player.upgrades.coin), state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
+app.post("/api/equip-best", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const existing = player.placedAliens.filter(Boolean); for (const slot of existing) addStack(player, slot.alienId, slot.plusLevel); const candidates = inventoryStacks(player); const selected = []; const usedIds = new Set(); for (const candidate of candidates) { if (selected.length >= player.placedAliens.length) break; if (usedIds.has(candidate.id)) continue; selected.push(candidate); usedIds.add(candidate.id); removeStack(player, candidate.id, candidate.plusLevel, 1); }
+      const before = existing.map((slot) => stackKey(slot.alienId, slot.plusLevel)).sort().join(","); const after = selected.map((slot) => stackKey(slot.id, slot.plusLevel)).sort().join(","); player.placedAliens = Array.from({ length: player.placedAliens.length }, (_, index) => selected[index] ? { alienId: selected[index].id, plusLevel: selected[index].plusLevel, lastCollected: Date.now() } : null); return { ok: true, changed: before !== after, state: gameStateFor(request.userId) }; }); response.json(result); } catch (error) { next(error); } });
+app.post("/api/place-alien", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const { alienId } = request.body || {}; const plusLevel = integer(request.body?.plusLevel); const slotIndex = integer(request.body?.slotIndex, -1); if (!ALIEN_BY_ID.has(alienId) || plusLevel < 0 || plusLevel > 3 || slotIndex < 0 || slotIndex >= TEAM_SLOT_COUNT) return response.status(400).json({ error: "Invalid deployment request." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { if (player.placedAliens[slotIndex]) return { ok: false, error: "Recall the current alien first.", state: gameStateFor(request.userId) }; if (!removeStack(player, alienId, plusLevel, 1)) return { ok: false, error: "That alien is no longer in storage.", state: gameStateFor(request.userId) }; player.placedAliens[slotIndex] = { alienId, plusLevel, lastCollected: Date.now() }; return { ok: true, state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
+app.post("/api/remove-alien", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const slotIndex = integer(request.body?.slotIndex, -1); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const slot = player.placedAliens[slotIndex]; if (!slot) return { ok: false, error: "That team slot is already empty.", state: gameStateFor(request.userId) }; if (!addStack(player, slot.alienId, slot.plusLevel)) throw new Error("Inventory stack reached its safe maximum."); player.placedAliens[slotIndex] = null; return { ok: true, state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
+app.post("/api/auto-roll", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("roll"), async (request, response, next) => { try { if (typeof request.body?.enabled !== "boolean") return response.status(400).json({ error: "Auto Roll must be on or off." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { player.autoRollActive = request.body.enabled; player.autoRollTouchedAt = Date.now(); return { ok: true, state: gameStateFor(request.userId) }; }); response.json(result); } catch (error) { next(error); } });
+app.post("/api/settings", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const patch = request.body?.settings; if (!patch || typeof patch !== "object") return response.status(400).json({ error: "Invalid settings." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { for (const key of ["rollingAnimation", "fullDiscovery"]) if (typeof patch[key] === "boolean") player.settings[key] = patch[key]; return { ok: true, state: gameStateFor(request.userId) }; }); response.json(result); } catch (error) { next(error); } });
+app.post("/api/profile/avatar", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const alienId = request.body?.alienId; const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { if (!ALIEN_BY_ID.has(alienId) || !player.discoveredAlienIds[alienId]) return { ok: false, error: "Choose an alien you have discovered.", state: gameStateFor(request.userId) }; player.avatarAlienId = alienId; return { ok: true, state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
 
-app.post("/api/roll", requireSession, requireSameOrigin, async (request, response, next) => {
-  try {
-    const result = await withDatabaseLock(() => {
-      const player = database.users[request.userId];
-      if (!validatePlayer(player)) throw new Error("Stored player data has an invalid shape.");
-      applyPassiveIncome(player);
-      const result = pickAlien(player);
-      player.inventory[result.alien.id] = (Number(player.inventory[result.alien.id]) || 0) + 1;
-      player.total_rolls += 1;
-      return {
-        ok: true,
-        rolled: result.alien,
-        state: gameStateFor(request.userId)
-      };
-    });
-    if (!result.ok) return response.status(result.status).json(result);
-    return response.json(result);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-app.post("/api/buy-shop", requireSession, requireSameOrigin, async (request, response, next) => {
-  try {
-    const upgrade = request.body?.upgrade;
-    if (typeof upgrade !== "string" || !UPGRADE_CONFIG[upgrade]) return response.status(400).json({ error: "Unknown shop upgrade." });
-    const result = await withDatabaseLock(() => {
-      const player = database.users[request.userId];
-      if (!validatePlayer(player)) throw new Error("Stored player data has an invalid shape.");
-      applyPassiveIncome(player);
-      const level = player.shop_purchases[upgrade];
-      const cost = upgradeCost(level);
-      if (player.money + 0.00001 < cost) return { ok: false, status: 400, error: "Not enough credits for that upgrade.", state: gameStateFor(request.userId) };
-      player.money = roundFinancial(player.money - cost);
-      player.shop_purchases[upgrade] += 1;
-      return { ok: true, state: gameStateFor(request.userId) };
-    });
-    if (!result.ok) return response.status(result.status).json(result);
-    return response.json(result);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-app.post(
-  "/api/buy-temporary-luck",
-  requireSession,
-  requireSameOrigin,
-  async (request, response, next) => {
-    try {
-      const amount = Number(request.body?.amount);
-
-      if (!Number.isFinite(amount) || amount <= 0) {
-        return response.status(400).json({
-          error: "Enter a valid amount of money."
-        });
-      }
-
-      const spent = roundFinancial(
-        Math.min(TEMPORARY_LUCK_CONFIG.maxMoney, amount)
-      );
-
-      const result = await withDatabaseLock(() => {
-        const player = database.users[request.userId];
-
-        if (!validatePlayer(player)) {
-          throw new Error("Stored player data has an invalid shape.");
-        }
-
-        applyPassiveIncome(player);
-
-        if (player.money + 0.00001 < spent) {
-          return {
-            ok: false,
-            status: 400,
-            error: "Not enough credits."
-          };
-        }
-
-        const luck = temporaryLuckFromMoney(spent);
-        const now = Date.now();
-
-        const currentActive =
-          Number(player.temporary_luck) > 0 &&
-          Number(player.temporary_luck_expires_at) > now;
-
-        if (
-          !currentActive ||
-          luck > Number(player.temporary_luck)
-        ) {
-          player.temporary_luck = luck;
-          player.temporary_luck_expires_at =
-            now + TEMPORARY_LUCK_CONFIG.durationMs;
-        }
-
-        player.money = roundFinancial(player.money - spent);
-
-        return {
-          ok: true,
-          state: gameStateFor(request.userId)
-        };
-      });
-
-      if (!result.ok) {
-        return response.status(result.status).json(result);
-      }
-
-      return response.json(result);
-    } catch (error) {
-      return next(error);
-    }
-  }
-);
-
-app.post("/api/buy-slot", requireSession, requireSameOrigin, async (request, response, next) => {
-  try {
-    const result = await withDatabaseLock(() => {
-      const player = database.users[request.userId];
-      if (!validatePlayer(player)) throw new Error("Stored player data has an invalid shape.");
-      applyPassiveIncome(player);
-      const slots = getSlotCount(player);
-      const cost = 500 * (2 ** slots);
-      if (!Number.isSafeInteger(cost) || player.money + 0.00001 < cost) return { ok: false, status: 400, error: "Not enough credits for a new container.", state: gameStateFor(request.userId) };
-      player.money = roundFinancial(player.money - cost);
-      if (player.placed_aliens.length === 0) player.placed_aliens.push(null, null);
-      else player.placed_aliens.push(null);
-      return { ok: true, state: gameStateFor(request.userId) };
-    });
-    if (!result.ok) return response.status(result.status).json(result);
-    return response.json(result);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-app.post("/api/remove-alien", requireSession, requireSameOrigin, async (request, response, next) => {
-  try {
-    const slotIndex = request.body?.slotIndex;
-    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 1000) {
-      return response.status(400).json({ error: "Invalid container selection." });
-    }
-    const result = await withDatabaseLock(() => {
-      const player = database.users[request.userId];
-      if (!validatePlayer(player)) throw new Error("Stored player data has an invalid shape.");
-      applyPassiveIncome(player);
-      const slot = player.placed_aliens[slotIndex];
-      if (!slot || !ALIEN_BY_ID.has(slot.alien_id)) return { ok: false, status: 400, error: "That container is already empty.", state: gameStateFor(request.userId) };
-      const quantity = Number(player.inventory[slot.alien_id]) || 0;
-      if (!Number.isSafeInteger(quantity) || quantity >= Number.MAX_SAFE_INTEGER - 1) {
-        return { ok: false, status: 400, error: "Inventory stack is at its safe maximum.", state: gameStateFor(request.userId) };
-      }
-      player.inventory[slot.alien_id] = quantity + 1;
-      player.placed_aliens[slotIndex] = null;
-      return { ok: true, state: gameStateFor(request.userId) };
-    });
-    if (!result.ok) return response.status(result.status).json(result);
-    return response.json(result);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-app.post("/api/place-alien", requireSession, requireSameOrigin, async (request, response, next) => {
-  try {
-    const alienId = request.body?.alienId;
-    const slotIndex = request.body?.slotIndex;
-    if (typeof alienId !== "string" || !ALIEN_BY_ID.has(alienId) || !Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 1000) {
-      return response.status(400).json({ error: "Invalid alien placement request." });
-    }
-    const result = await withDatabaseLock(() => {
-      const player = database.users[request.userId];
-      if (!validatePlayer(player)) throw new Error("Stored player data has an invalid shape.");
-      applyPassiveIncome(player);
-      const slots = getSlotCount(player);
-      if (slotIndex >= slots) return { ok: false, status: 400, error: "That container is not unlocked." };
-      if ((Number(player.inventory[alienId]) || 0) < 1) return { ok: false, status: 400, error: "That alien is not in your inventory." };
-      if (player.placed_aliens[slotIndex]) return { ok: false, status: 400, error: "Choose an empty container." };
-      player.inventory[alienId] -= 1;
-      if (player.inventory[alienId] === 0) delete player.inventory[alienId];
-      if (player.placed_aliens.length === 0) player.placed_aliens.push({ alien_id: alienId, last_collected: Date.now() });
-      else player.placed_aliens[slotIndex] = { alien_id: alienId, last_collected: Date.now() };
-      return { ok: true, state: gameStateFor(request.userId) };
-    });
-    if (!result.ok) return response.status(result.status).json(result);
-    return response.json(result);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-app.post("/api/trade", requireSession, requireSameOrigin, async (request, response, next) => {
-  try {
-    const recipient = typeof request.body?.recipient === "string"
-      ? request.body.recipient.trim()
-      : "";
-
-    const alienId = request.body?.alienId;
-    const quantity = Number(request.body?.quantity);
-
-    if (!recipient || recipient.length > 24) {
-      return response.status(400).json({ error: "Invalid recipient username." });
-    }
-
-    if (typeof alienId !== "string" || !ALIEN_BY_ID.has(alienId)) {
-      return response.status(400).json({ error: "Invalid alien selection." });
-    }
-
-    if (!Number.isSafeInteger(quantity) || quantity < 1) {
-      return response.status(400).json({ error: "Invalid trade quantity." });
-    }
-
-    const result = await withDatabaseLock(() => {
-      const sender = database.users[request.userId];
-
-      if (!validatePlayer(sender)) {
-        throw new Error("Stored player data has an invalid shape.");
-      }
-
-      applyPassiveIncome(sender);
-
-      const recipientEntry = Object.entries(database.users).find(
-        ([, player]) => player.name.toLowerCase() === recipient.toLowerCase()
-      );
-
-      if (!recipientEntry) {
-        return {
-          ok: false,
-          status: 404,
-          error: "That pilot does not exist."
-        };
-      }
-
-      const [recipientId, receiver] = recipientEntry;
-
-      if (recipientId === request.userId) {
-        return {
-          ok: false,
-          status: 400,
-          error: "You cannot trade with yourself."
-        };
-      }
-
-      const ownedQuantity = Number(sender.inventory[alienId]) || 0;
-
-      if (ownedQuantity < quantity) {
-        return {
-          ok: false,
-          status: 400,
-          error: `You only have ${ownedQuantity} of that alien.`
-        };
-      }
-
-      if (!validatePlayer(receiver)) {
-        throw new Error("Stored recipient data has an invalid shape.");
-      }
-
-      sender.inventory[alienId] -= quantity;
-
-      if (sender.inventory[alienId] === 0) {
-        delete sender.inventory[alienId];
-      }
-
-      receiver.inventory[alienId] =
-        (Number(receiver.inventory[alienId]) || 0) + quantity;
-
-      return {
-        ok: true,
-        state: gameStateFor(request.userId)
-      };
-    });
-
-    if (!result.ok) {
-      return response.status(result.status).json(result);
-    }
-
-    return response.json(result);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-app.post("/api/logout", requireSession, requireSameOrigin, (request, response) => {
-  sessions.delete(request.sessionToken);
-  clearSessionCookie(response);
-  response.status(204).end();
-});
+// Trade rooms intentionally remain tiny, server-owned records. Offers refer to
+// an exact permanent alien ID plus its stored shiny level, never a display name.
+function roomFor(id, userId) { const room = state.tradeRooms.get(id); return room && room.members.includes(userId) && room.expiresAt > Date.now() ? room : null; }
+function roomPublic(room, userId) { const partnerId = room.members.find((id) => id !== userId); const offer = (id) => { const item = room.offers[id]; return item ? publicStack(item.alienId, item.plusLevel, item.quantity) : null; }; return { id: room.id, status: room.status, partner: state.users[partnerId]?.name || "Unknown", invitedByMe: room.inviterId === userId, expiresAt: room.expiresAt, myOffer: offer(userId), partnerOffer: offer(partnerId), myConfirmed: room.confirmed.includes(userId), partnerConfirmed: room.confirmed.includes(partnerId) }; }
+app.get("/api/trade-rooms", requireSession, (request, response) => response.json({ rooms: [...state.tradeRooms.values()].filter((room) => room.members.includes(request.userId) && room.expiresAt > Date.now()).map((room) => roomPublic(room, request.userId)) }));
+app.post("/api/trade-rooms", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("trade"), async (request, response, next) => { try { const recipient = String(request.body?.recipient || "").trim(); const result = await withLock(async () => { const found = Object.entries(state.users).find(([, player]) => player.name.toLowerCase() === recipient.toLowerCase()); if (!found || found[0] === request.userId) return { ok: false, error: "Choose another existing pilot." }; const [partnerId] = found; const duplicate = [...state.tradeRooms.values()].some((room) => room.status !== "completed" && room.members.includes(request.userId) && room.members.includes(partnerId) && room.expiresAt > Date.now()); if (duplicate) return { ok: false, error: "You already have an active room with that pilot." }; const room = { id: crypto.randomUUID(), inviterId: request.userId, members: [request.userId, partnerId], status: "invited", offers: {}, confirmed: [], expiresAt: Date.now() + 5 * 60_000 }; state.tradeRooms.set(room.id, room); await persistTradeRoom(room); return { ok: true, room: roomPublic(room, request.userId) }; }); response.status(result.ok ? 201 : 409).json(result); } catch (error) { next(error); } });
+app.post("/api/trade-rooms/:roomId/accept", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("trade"), async (request, response, next) => { try { const result = await withLock(async () => { const room = roomFor(request.params.roomId, request.userId); if (!room || room.inviterId === request.userId || room.status !== "invited") return { ok: false, error: "This invitation is no longer available." }; room.status = "accepted"; room.expiresAt = Date.now() + 10 * 60_000; await persistTradeRoom(room); return { ok: true, room: roomPublic(room, request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
+app.post("/api/trade-rooms/:roomId/offer", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("trade"), async (request, response, next) => { try { const alienId = request.body?.alienId; const plusLevel = integer(request.body?.plusLevel); const quantity = integer(request.body?.quantity); const result = await withLock(async () => { const room = roomFor(request.params.roomId, request.userId); const player = state.users[request.userId]; if (!room || room.status !== "accepted" || !ALIEN_BY_ID.has(alienId) || plusLevel < 0 || plusLevel > 3 || quantity < 1 || integer(player.inventory[stackKey(alienId, plusLevel)]) < quantity) return { ok: false, error: "That offer is not available." }; room.offers[request.userId] = { alienId, plusLevel, quantity }; room.confirmed = []; await persistTradeRoom(room); return { ok: true, room: roomPublic(room, request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
+app.post("/api/trade-rooms/:roomId/confirm", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("trade"), async (request, response, next) => { try { const result = await withLock(async () => { const room = roomFor(request.params.roomId, request.userId); if (!room || room.status !== "accepted") return { ok: false, error: "Trade room is unavailable." }; const [aId, bId] = room.members; const aOffer = room.offers[aId]; const bOffer = room.offers[bId]; if (!aOffer || !bOffer) return { ok: false, error: "Both pilots must place an offer." }; if (!room.confirmed.includes(request.userId)) room.confirmed.push(request.userId); if (room.confirmed.length < 2) { await persistTradeRoom(room); return { ok: true, settled: false, room: roomPublic(room, request.userId) }; } const a = state.users[aId]; const b = state.users[bId]; if (integer(a.inventory[stackKey(aOffer.alienId, aOffer.plusLevel)]) < aOffer.quantity || integer(b.inventory[stackKey(bOffer.alienId, bOffer.plusLevel)]) < bOffer.quantity) { room.confirmed = []; await persistTradeRoom(room); return { ok: false, error: "An offered stack changed; confirmations were cleared." }; } removeStack(a, aOffer.alienId, aOffer.plusLevel, aOffer.quantity); removeStack(b, bOffer.alienId, bOffer.plusLevel, bOffer.quantity); addStack(a, bOffer.alienId, bOffer.plusLevel, bOffer.quantity); addStack(b, aOffer.alienId, aOffer.plusLevel, aOffer.quantity); a.discoveredAlienIds[bOffer.alienId] = true; b.discoveredAlienIds[aOffer.alienId] = true; room.status = "completed"; await persistPlayers([aId, bId], room.id); state.tradeRooms.delete(room.id); return { ok: true, settled: true, state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
+app.post("/api/trade-rooms/:roomId/cancel", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("trade"), async (request, response, next) => { try { const result = await withLock(async () => { const room = roomFor(request.params.roomId, request.userId); if (!room) return false; state.tradeRooms.delete(room.id); await removeTradeRoom(room.id); return true; }); return result ? response.status(204).end() : response.status(404).json({ error: "Trade room is unavailable." }); } catch (error) { return next(error); } });
+app.get("/api/ranks", requireSession, (request, response) => { const rows = Object.entries(state.users).map(([id, player]) => ({ id, name: player.name, rolls: player.totalRolls, top: publicAlien(topAlien(player)), rarityScore: topAlien(player)?.baseChanceLog || 0 })).sort((a, b) => b.rarityScore - a.rarityScore || b.rolls - a.rolls || a.name.localeCompare(b.name)); const rank = rows.findIndex((row) => row.id === request.userId) + 1; response.json({ rank, rows: rows.slice(0, 25).map((row, index) => ({ ...row, rank: index + 1, isCurrentPlayer: row.id === request.userId })), stats: statsFor(state.users[request.userId]) }); });
+app.get("/api/profiles/:id", requireSession, (request, response) => { const player = state.users[request.params.id]; if (!player) return response.status(404).json({ error: "Pilot not found." }); response.json({ profile: { name: player.name, avatar: publicAlien(ALIEN_BY_ID.get(player.avatarAlienId)), activeTeam: player.placedAliens.filter(Boolean).map((slot) => publicStack(slot.alienId, slot.plusLevel, 1, player.upgrades.coin)), stats: statsFor(player) } }); });
+app.post("/api/logout", requireSession, requireSameOrigin, requireJson, requireCsrf, async (request, response, next) => { try { await pool.query("DELETE FROM game_sessions WHERE id=$1", [request.session.id]); state.sessions.delete(request.sessionToken); const player = state.users[request.userId]; player.autoRollActive = false; player.activeSessionId = null; await persistPlayers([request.userId]); clearCookie(response); response.status(204).end(); } catch (error) { next(error); } });
+// Development-only test hook. It is never registered on production hosts.
+if (process.env.NODE_ENV !== "production" && process.env.DEBUG_GAME === "true") app.post("/api/debug/grant", requireSession, requireSameOrigin, requireJson, requireCsrf, async (request, response, next) => { try { const amount = bounded(number(request.body?.coins), 0, 1e12); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { player.money = balance.roundGame(player.money + amount); return { ok: true, state: gameStateFor(request.userId) }; }); response.json(result); } catch (error) { next(error); } });
 
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"], index: "index.html", maxAge: "1h" }));
-app.use((error, request, response, next) => { // eslint-disable-line no-unused-vars
-  if (error instanceof SyntaxError && "body" in error) return response.status(400).json({ error: "Request body must be valid JSON." });
-  console.error(error);
-  return response.status(500).json({ error: "The game server encountered an unexpected error." });
-});
+app.use((error, request, response, next) => { if (error instanceof SyntaxError && "body" in error) return response.status(400).json({ error: "Request body must be valid JSON." }); console.error(error); return response.status(500).json({ error: "The game server encountered an unexpected error." }); });
+setInterval(() => { const now = Date.now(); for (const [token, session] of state.sessions) if (session.expiresAt < now) state.sessions.delete(token); for (const [key, stamps] of state.requests) { const fresh = stamps.filter((stamp) => stamp > now - 15 * 60_000); if (fresh.length) state.requests.set(key, fresh); else state.requests.delete(key); } for (const [id, room] of state.tradeRooms) if (room.expiresAt < now || room.status === "completed") state.tradeRooms.delete(id); }, 60_000).unref();
+if (require.main === module) initializeDatabase().then(() => app.listen(Number.isFinite(PORT) ? PORT : 3000, "0.0.0.0", () => console.log(`AFK Alien Dice is running on ${PORT}`))).catch((error) => { console.error("Failed to initialize PostgreSQL:", error); process.exit(1); });
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, session] of sessions) if (session.expiresAt < now) sessions.delete(token);
-}, 60 * 60 * 1000).unref();
-
-initializeDatabase()
-  .then(() => {
-    app.listen(
-      Number.isFinite(PORT) ? PORT : 3000,
-      "0.0.0.0",
-      () => {
-        console.log(
-          `AFK Alien Dice is running on port ${
-            Number.isFinite(PORT) ? PORT : 3000
-          }`
-        );
-      }
-    );
-  })
-  .catch((error) => {
-    console.error("Failed to initialize PostgreSQL:", error);
-    process.exit(1);
-  });
+module.exports = { app, ALIENS, balance, compareStacks, pickAlien, stackKey };

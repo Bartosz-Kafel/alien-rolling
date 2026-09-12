@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "echo 'No build step required for static assets'"
+    "build": "echo 'No build step required for static assets'",
+    "simulate:economy": "node scripts/simulate-economy.js",
+    "test": "node scripts/self-test.js",
+    "generate:aliens": "node scripts/generate-aliens.js 10000"
   },
   "dependencies": {
     "express": "^4.19.2",
