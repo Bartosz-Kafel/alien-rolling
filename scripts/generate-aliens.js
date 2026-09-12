@@ -7,7 +7,7 @@ const path = require("path");
 const { rarityForLog } = require("../balance");
 
 const output = path.join(__dirname, "..", "data", "alien-registry.json");
-const TARGET_COUNT = Number.parseInt(process.argv[2] || "2500", 10);
+const TARGET_COUNT = Number.parseInt(process.argv[2] || "2000", 10);
 const force = process.argv.includes("--force");
 const prefixes = ["Aether", "Amber", "Arc", "Astral", "Aurora", "Binary", "Blazing", "Hard", "Cipher", 
   "Prism", "Holy", "Quantum", "Radiant", "Rift", "Rune", "Solar", "Spectral", "Stellar", "Tempest", "Umbra", 
@@ -60,9 +60,7 @@ for (let number = 1; number <= TARGET_COUNT; number += 1) {
   const baseChance = chanceFromLog(baseChanceLog);
   const prefix = pick(prefixes, id, "prefix");
   const speciesName = pick(species, id, "species");
-  let name = `${prefix} ${speciesName}`;
-  if (names.has(name)) name = `${name} of Signal ${number}`;
-  names.add(name);
+  const name = `${prefix} ${speciesName}`;
   const rarity = rarityForLog(baseChanceLog);
   byId.set(id, { id, name, prefix, species: speciesName, emoji: pick(emojis, id, "emoji"), rarity: rarity.name, color: rarity.color, baseChance, baseChanceLog: Number(baseChanceLog.toFixed(6)), baseIncome: Number((2 * (10 ** ((baseChanceLog - 2.7) * 0.30))).toPrecision(10)) });
 }
