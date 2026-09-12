@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="starfield" aria-hidden="true"></div><div id="rollFlash" class="roll-flash" aria-hidden="true"></div>
+  <div class="starfield" aria-hidden="true"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <div id="loginModal" class="modal is-open" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
@@ -33,7 +33,7 @@
   <main id="app" class="app-shell" aria-hidden="true">
     <header class="topbar"><button id="headerAvatar" class="brand-mark" type="button" title="Your latest discovery">AD</button><div class="pilot-heading"><strong id="pilotName">Pilot</strong><small>ORBITAL COLLECTION UNIT</small></div><div class="balance-block"><span>COINS</span><strong id="moneyDisplay">0 ◈</strong><small id="incomeDisplay">+0 ◈ / sec</small></div><button id="settingsButton" class="utility-button" type="button" aria-label="Open settings">⚙</button><button id="logoutButton" class="utility-button" type="button" aria-label="Log out">↪</button></header>
 
-    <section id="rollingView" class="view rolling-view" aria-labelledby="rollingHeading">
+    <section id="rollingView" class="view rolling-view" aria-labelledby="rollingHeading"> <div id="rollFlash" class="roll-flash" aria-hidden="true"></div>
       <div class="rolling-layout"><aside class="orbit-side luck-meter"><span>🍀</span><small>ACTIVE LUCK</small><strong id="luckValue">x1</strong><em id="pendingLuck">No pending boost</em></aside>
         <div id="rollingMain" class="rolling-main"><div id="rollFx" class="roll-fx" aria-hidden="true"></div><p class="eyebrow">QUANTUM ROLL CORE</p><h1 id="rollingHeading">Roll for an alien</h1><p id="rollHint" class="muted">Server-authorized signal · every die resolves independently.</p><button id="rollButton" class="dice-button" type="button" aria-label="Roll the dice"><span class="dice-shadow"></span><span id="dice" class="dice"><span class="dice-face face-front"><i></i><i></i><i></i><i></i><i></i></span><span class="dice-face face-back"><i></i><i></i><i></i><i></i></span><span class="dice-face face-right"><i></i><i></i><i></i></span><span class="dice-face face-left"><i></i><i></i><i></i></span><span class="dice-face face-top"><i></i></span><span class="dice-face face-bottom"><i></i><i></i><i></i><i></i><i></i><i></i></span></span></button><p class="dice-caption">TAP TO ROLL <b id="diceCount">1 DIE</b></p>
           <div id="resultBox" class="result-box" aria-live="polite"><div class="signal-previous"><small>LEAVING</small><b id="previousResult">—</b></div><div class="signal-core"><span id="resultIcon">🎲</span><div><small id="resultState">READY</small><h2 id="resultName">Awaiting signal</h2><p id="resultInfo">The reveal lands here.</p></div></div><div class="signal-next"><small>APPROACHING</small><b id="nextResult">???</b></div></div>

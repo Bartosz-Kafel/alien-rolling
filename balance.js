@@ -28,9 +28,9 @@ const RARITIES = Object.freeze([
 ]);
 
 const UPGRADE_DEFINITIONS = Object.freeze({
-  luck: { id: "luck", label: "Luck Lattice", icon: "🍀", description: "Permanently bends future rolls toward scarce signals.", baseCost: 180, growth: 1.165 },
-  speed: { id: "speed", label: "Roll Drive", icon: "⚡", description: "Shortens roll recovery with a safe diminishing cap.", baseCost: 240, growth: 1.195 },
-  coin: { id: "coin", label: "Coin Reactor", icon: "✹", description: "Amplifies income from your equipped alien team.", baseCost: 220, growth: 1.18 }
+  luck: { id: "luck", label: "Luck Lattice", icon: "🍀", description: "Permanently bends future rolls toward scarce signals.", baseCost: 50, growth: 1.15 },
+  speed: { id: "speed", label: "Roll Drive", icon: "⚡", description: "Shortens roll recovery with a safe diminishing cap.", baseCost: 100, growth: 1.2 },
+  coin: { id: "coin", label: "Coin Reactor", icon: "✹", description: "Amplifies income from your equipped alien team.", baseCost: 50, growth: 1.3 }
 });
 
 function roundGame(value) {
@@ -46,13 +46,11 @@ function upgradeCost(key, level) {
 }
 
 function luckMultiplier(level) {
-  // A super-linear early curve makes upgrades tactile; the probability
-  // transform below prevents this display number from becoming runaway power.
-  return roundGame(1 + 0.28 * (((Math.max(0, level) + 1) ** 0.93) - 1));
+  return roundGame(1.2 ** Math.max(0, level));
 }
 
 function coinMultiplier(level) {
-  return roundGame(1 + 0.18 * (((Math.max(0, level) + 1) ** 0.78) - 1));
+  return roundGame(1.18 ** Math.max(0, level));
 }
 
 function speedReduction(level) {
@@ -71,7 +69,13 @@ function diceCost(currentDice) {
 }
 
 function luckExponent(luck) {
-  return Math.max(0.025, Math.max(1, Number(luck) || 1) ** -0.55);
+  const safeLuck = Math.max(1, Number(luck) || 1);
+
+  // Luck grows exponentially in the shop, but its effect on rarity
+  // grows logarithmically so extreme Luck does not destroy rarity.
+  const rarityPressure = Math.log10(safeLuck);
+
+  return 1 / (1 + rarityPressure / 8);
 }
 
 function rarityForLog(baseChanceLog) {

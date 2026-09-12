@@ -21,7 +21,7 @@ const MAX_OFFLINE_SECONDS = 12 * 60 * 60;
 const MAX_INVENTORY_STACK = Number.MAX_SAFE_INTEGER - 1;
 const MAX_MONEY = 1e96;
 const TEAM_SLOT_COUNT = 3;
-const RATE_LIMITS = { login: [10, 60_000], roll: [90, 60_000], buy: [30, 60_000], inventory: [50, 60_000], trade: [40, 60_000] };
+const RATE_LIMITS = { login: [20, 60_000], roll: [120, 60_000], buy: [120, 60_000], inventory: [60, 60_000], trade: [40, 60_000] };
 
 const state = { users: {}, sessions: new Map(), tradeRooms: new Map(), queue: [], busy: false, requests: new Map(), distributionCache: new Map() };
 
@@ -180,6 +180,14 @@ function rate(bucket) { return (request, response, next) => withinRate(bucket, r
 function activeAutoRoll(player, now = Date.now()) { if (!player.autoRollActive) return false; if (now - player.autoRollTouchedAt < 65_000) return true; player.autoRollActive = false; return false; }
 function permanentLuck(player) { return balance.luckMultiplier(player.upgrades.luck); }
 function effectiveLuck(player) { return balance.roundGame(permanentLuck(player) * (1 + player.pendingLuck)); }
+function rollLuck(maxLuck) {
+  const safeMax = Math.max(1, Number(maxLuck) || 1);
+  const rarity = 6;
+
+  return balance.roundGame(
+    1 + (safeMax - 1) * Math.pow(Math.random(), rarity)
+  );
+}
 function totalIncome(player, now = Date.now()) { const income = player.placedAliens.reduce((sum, slot) => sum + (slot ? balance.incomeFor(ALIEN_BY_ID.get(slot.alienId), slot.plusLevel, player.upgrades.coin) : 0), 0); return balance.roundGame(income * (activeAutoRoll(player, now) ? balance.AUTO_ROLL_INCOME_MULTIPLIER : 1)); }
 function applyIncome(player, now = Date.now()) { const seconds = bounded((now - player.lastSeenAt) / 1000, 0, MAX_OFFLINE_SECONDS); player.lastSeenAt = now; if (!seconds) return 0; const earned = Math.min(MAX_MONEY - player.money, totalIncome(player, now) * seconds); player.money = balance.roundGame(player.money + earned); player.stats.totalMoneyEarned = balance.roundGame(player.stats.totalMoneyEarned + earned); player.stats.playtimeSeconds = balance.roundGame(player.stats.playtimeSeconds + Math.min(seconds, 90)); return earned; }
 function addStack(player, alienId, plusLevel = 0, amount = 1) { const key = stackKey(alienId, plusLevel); const before = integer(player.inventory[key]); if (!ALIEN_BY_ID.has(alienId) || before < 0 || amount < 1 || before > MAX_INVENTORY_STACK - amount) return false; player.inventory[key] = before + amount; return true; }
@@ -192,10 +200,102 @@ function recordMutation(player, id, payload) { if (!id) return; player.lastMutat
 async function mutate(userId, id, work) { return withLock(async () => { const player = state.users[userId]; if (!player) throw new Error("Player record disappeared."); if (id && player.lastMutationId === id && player.lastMutationResponse) return player.lastMutationResponse; applyIncome(player); const payload = await work(player); recordMutation(player, id, payload); await persistPlayers([userId]); return payload; }); }
 
 function distributionFor(luck) {
-  const exponent = balance.luckExponent(luck); const key = exponent.toFixed(6); const existing = state.distributionCache.get(key); if (existing) return existing;
-  const prefix = new Float64Array(ALIENS.length); let total = 0;
-  for (let i = 0; i < ALIENS.length; i += 1) { total += 10 ** (-ALIENS[i].baseChanceLog * exponent); prefix[i] = total; }
-  const distribution = { prefix, total, exponent }; if (state.distributionCache.size > 120) state.distributionCache.delete(state.distributionCache.keys().next().value); state.distributionCache.set(key, distribution); return distribution;
+  const exponent = balance.luckExponent(luck);
+  const key = exponent.toFixed(6);
+
+  const existing = state.distributionCache.get(key);
+  if (existing) return existing;
+
+  const rawWeights = new Float64Array(ALIENS.length);
+
+  let total = 0;
+
+  // First calculate the normal, no-Luck distribution.
+  for (let i = 0; i < ALIENS.length; i += 1) {
+    const weight = 10 ** (-ALIENS[i].baseChanceLog);
+
+    rawWeights[i] = weight;
+    total += weight;
+  }
+
+  /*
+   * Luck is applied to the CUMULATIVE RARITY curve rather than
+   * directly to every alien's probability.
+   *
+   * This is important:
+   *
+   * Common aliens remain common.
+   * Rare aliens become more likely.
+   * Extremely rare aliens remain extremely rare.
+   *
+   * ALIENS must be ordered from most common -> rarest.
+   */
+
+  const prefix = new Float64Array(ALIENS.length);
+
+  let cumulative = 0;
+
+  for (let i = 0; i < ALIENS.length; i += 1) {
+    cumulative += rawWeights[i] / total;
+    prefix[i] = cumulative;
+  }
+
+  /*
+   * Convert the normal CDF into a rarity curve.
+   *
+   * At Luck 1:
+   *   exponent = 1
+   *   distribution stays unchanged.
+   *
+   * As Luck increases:
+   *   exponent decreases slowly.
+   *
+   * Because the transformation is logarithmic, even enormous
+   * Luck values do not flatten the entire rarity table.
+   */
+
+  const transformed = new Float64Array(ALIENS.length);
+
+  for (let i = 0; i < ALIENS.length; i += 1) {
+    const previous = i === 0 ? 0 : prefix[i - 1];
+    const current = prefix[i];
+
+    const previousTail = 1 - previous;
+    const currentTail = 1 - current;
+
+    const transformedPreviousTail =
+      previousTail <= 0 ? 0 : previousTail ** exponent;
+
+    const transformedCurrentTail =
+      currentTail <= 0 ? 0 : currentTail ** exponent;
+
+    transformed[i] =
+      transformedPreviousTail - transformedCurrentTail;
+  }
+
+  // Turn the transformed probabilities back into a prefix table.
+  let transformedTotal = 0;
+
+  for (let i = 0; i < ALIENS.length; i += 1) {
+    transformedTotal += Math.max(0, transformed[i]);
+    prefix[i] = transformedTotal;
+  }
+
+  const distribution = {
+    prefix,
+    total: transformedTotal,
+    exponent
+  };
+
+  if (state.distributionCache.size > 120) {
+    state.distributionCache.delete(
+      state.distributionCache.keys().next().value
+    );
+  }
+
+  state.distributionCache.set(key, distribution);
+
+  return distribution;
 }
 function pickAlien(luck) { const distribution = distributionFor(luck); const target = crypto.randomInt(1_000_000_000) / 1_000_000_000 * distribution.total; let low = 0; let high = ALIENS.length - 1; while (low < high) { const mid = (low + high) >> 1; if (target < distribution.prefix[mid]) high = mid; else low = mid + 1; } return ALIENS[low]; }
 function compareStacks(left, right) { return right.power - left.power || right.plusLevel - left.plusLevel || right.baseChanceLog - left.baseChanceLog || left.id.localeCompare(right.id); }
@@ -218,11 +318,17 @@ app.get("/api/catalog", requireSession, (request, response) => { const offset = 
 app.get("/api/inventory", requireSession, (request, response) => { const offset = bounded(integer(request.query.offset), 0, Number.MAX_SAFE_INTEGER); const limit = bounded(integer(request.query.limit, 60), 1, 100); const search = String(request.query.search || "").trim().toLowerCase(); const rarity = String(request.query.rarity || ""); const all = inventoryStacks(state.users[request.userId]).filter((entry) => (!search || entry.name.toLowerCase().includes(search)) && (!rarity || entry.rarity === rarity)); const entries = all.slice(offset, offset + limit); response.json({ entries, offset, nextOffset: offset + entries.length < all.length ? offset + entries.length : null, totalStacks: all.length, totalCopies: all.reduce((sum, entry) => sum + entry.count, 0) }); });
 
 app.post("/api/roll", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("roll"), async (request, response, next) => {
-  try { const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const now = Date.now(); const cooldown = Math.max(720, Math.round(balance.rollAnimationDuration(player.upgrades.speed) * 0.36)); if (now - player.lastRollAt < cooldown) return { ok: false, error: "Roll drive is still stabilizing.", state: gameStateFor(request.userId) }; const luck = effectiveLuck(player); const results = []; const discoveries = []; for (let die = 0; die < player.diceCount; die += 1) { const alien = pickAlien(luck); if (!addStack(player, alien.id, 0)) throw new Error("Inventory stack reached its safe maximum."); const isNew = !player.discoveredAlienIds[alien.id]; player.discoveredAlienIds[alien.id] = true; if (isNew) discoveries.push(publicAlien(alien)); results.push(publicAlien(alien)); } player.lastRollAt = now; if (player.autoRollActive) player.autoRollTouchedAt = now; player.totalRolls += player.diceCount; player.pendingLuck = 0; if (!player.avatarAlienId) player.avatarAlienId = results[0].id; const featured = [...results].sort((a, b) => b.baseChanceLog - a.baseChanceLog)[0]; const discovery = [...discoveries].sort((a, b) => b.baseChanceLog - a.baseChanceLog)[0] || null; return { ok: true, featured, results, discovery, newDiscoveries: discoveries, usedLuck: luck, state: gameStateFor(request.userId) }; }); return response.status(result.ok ? 200 : 429).json(result); } catch (error) { return next(error); }
+  try { const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const now = Date.now(); const cooldown = player.autoRollActive
+  ? 150
+  : Math.max(
+      720,
+      Math.round(balance.rollAnimationDuration(player.upgrades.speed) * 0.36)
+    ); if (now - player.lastRollAt < cooldown) return { ok: false, error: "Roll drive is still stabilizing.", state: gameStateFor(request.userId) }; const luckCap = effectiveLuck(player);
+const luck = rollLuck(luckCap); const results = []; const discoveries = []; for (let die = 0; die < player.diceCount; die += 1) { const alien = pickAlien(luck); if (!addStack(player, alien.id, 0)) throw new Error("Inventory stack reached its safe maximum."); const isNew = !player.discoveredAlienIds[alien.id]; player.discoveredAlienIds[alien.id] = true; if (isNew) discoveries.push(publicAlien(alien)); results.push(publicAlien(alien)); } player.lastRollAt = now; if (player.autoRollActive) player.autoRollTouchedAt = now; player.totalRolls += player.diceCount; player.pendingLuck = 0; if (!player.avatarAlienId) player.avatarAlienId = results[0].id; const featured = [...results].sort((a, b) => b.baseChanceLog - a.baseChanceLog)[0]; const discovery = [...discoveries].sort((a, b) => b.baseChanceLog - a.baseChanceLog)[0] || null; return { ok: true, featured, results, discovery, newDiscoveries: discoveries, usedLuck: luck, state: gameStateFor(request.userId) }; }); return response.status(result.ok ? 200 : 429).json(result); } catch (error) { return next(error); }
 });
 app.post("/api/buy-upgrade", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("buy"), async (request, response, next) => { try { const key = request.body?.upgrade; if (!balance.UPGRADE_DEFINITIONS[key]) return response.status(400).json({ error: "Unknown upgrade." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const cost = balance.upgradeCost(key, player.upgrades[key]); if (player.money < cost) return { ok: false, error: "Not enough coins for that upgrade.", state: gameStateFor(request.userId) }; player.money = balance.roundGame(player.money - cost); player.upgrades[key] += 1; return { ok: true, state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 400).json(result); } catch (error) { next(error); } });
 app.post("/api/buy-dice", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("buy"), async (request, response, next) => { try { const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const cost = balance.diceCost(player.diceCount); if (!Number.isFinite(cost)) return { ok: false, error: "Your dice array is at its safe limit.", state: gameStateFor(request.userId) }; if (player.money < cost) return { ok: false, error: "Save more coins for this major milestone.", state: gameStateFor(request.userId) }; player.money = balance.roundGame(player.money - cost); player.diceCount += 1; return { ok: true, state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 400).json(result); } catch (error) { next(error); } });
-app.post("/api/sacrifice", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const items = Array.isArray(request.body?.items) ? request.body.items : []; if (!items.length || items.length > 5) return response.status(400).json({ error: "Select one to sixty valid inventory stacks." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const normalized = []; const seen = new Set(); for (const item of items) { const alienId = item?.alienId; const plusLevel = integer(item?.plusLevel); const quantity = integer(item?.quantity); const key = stackKey(alienId, plusLevel); if (!ALIEN_BY_ID.has(alienId) || plusLevel < 0 || plusLevel > 3 || quantity < 1 || quantity > MAX_INVENTORY_STACK || seen.has(key) || integer(player.inventory[key]) < quantity) return { ok: false, error: "Your sacrifice selection is no longer available.", state: gameStateFor(request.userId) }; seen.add(key); normalized.push({ alienId, plusLevel, quantity }); }
+app.post("/api/sacrifice", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const items = Array.isArray(request.body?.items) ? request.body.items : []; if (!items.length || items.length > 60) return response.status(400).json({ error: "Select one to sixty valid inventory stacks." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const normalized = []; const seen = new Set(); for (const item of items) { const alienId = item?.alienId; const plusLevel = integer(item?.plusLevel); const quantity = integer(item?.quantity); const key = stackKey(alienId, plusLevel); if (!ALIEN_BY_ID.has(alienId) || plusLevel < 0 || plusLevel > 3 || quantity < 1 || quantity > MAX_INVENTORY_STACK || seen.has(key) || integer(player.inventory[key]) < quantity) return { ok: false, error: "Your sacrifice selection is no longer available.", state: gameStateFor(request.userId) }; seen.add(key); normalized.push({ alienId, plusLevel, quantity }); }
       let gained = 0; for (const item of normalized) gained += balance.sacrificeLuck(ALIEN_BY_ID.get(item.alienId), item.plusLevel) * item.quantity; for (const item of normalized) removeStack(player, item.alienId, item.plusLevel, item.quantity); player.pendingLuck = bounded(balance.roundGame(player.pendingLuck + gained), 0, 1e12); return { ok: true, gained: balance.roundGame(gained), state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
 app.post("/api/merge", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const alienId = request.body?.alienId; const plusLevel = integer(request.body?.plusLevel); if (!ALIEN_BY_ID.has(alienId) || plusLevel < 0 || plusLevel >= 3) return response.status(400).json({ error: "That alien cannot be merged." }); const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { if (!removeStack(player, alienId, plusLevel, 3)) return { ok: false, error: "You need exactly three matching copies in storage.", state: gameStateFor(request.userId) }; if (!addStack(player, alienId, plusLevel + 1)) throw new Error("Could not create shiny stack."); return { ok: true, merged: publicStack(alienId, plusLevel + 1, player.inventory[stackKey(alienId, plusLevel + 1)], player.upgrades.coin), state: gameStateFor(request.userId) }; }); response.status(result.ok ? 200 : 409).json(result); } catch (error) { next(error); } });
 app.post("/api/equip-best", requireSession, requireSameOrigin, requireJson, requireCsrf, rate("inventory"), async (request, response, next) => { try { const result = await mutate(request.userId, mutationId(request.body?.mutationId), (player) => { const existing = player.placedAliens.filter(Boolean); for (const slot of existing) addStack(player, slot.alienId, slot.plusLevel); const candidates = inventoryStacks(player); const selected = []; const usedIds = new Set(); for (const candidate of candidates) { if (selected.length >= player.placedAliens.length) break; if (usedIds.has(candidate.id)) continue; selected.push(candidate); usedIds.add(candidate.id); removeStack(player, candidate.id, candidate.plusLevel, 1); }
