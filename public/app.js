@@ -12,12 +12,22 @@ const dom = Object.fromEntries([
 ].map((id) => [id, $("#" + id)]));
 const N = window.gameNumbers;
 const state = {
-  game: null, csrfToken: "", activeView: "rolling", rolling: false, estimatedMoney: 0, lastMoneyTick: performance.now(), toastTimer: null, autoTimer: null, syncBusy: false, rollFxGeneration: 0,
-  inventory: { entries: [], nextOffset: null, totalCopies: 0, totalStacks: 0, loading: false, search: "" },
+  game: null, csrfToken: "", activeView: "rolling", rolling: false, estimatedMoney: 0, lastMoneyTick: performance.now(), toastTimer: null, autoTimer: null, syncBusy: false, rollFxGeneration: 0, rollCandidates: { entries: [], loading: false },
+  inventory: {
+    entries: [],
+    nextOffset: 0,
+    totalCopies: 0,
+    totalStacks: 0,
+    loading: false,
+    search: "",
+    hasMore: true,
+    dirty: true
+  },
   catalog: { entries: [], nextOffset: null, total: 0, loading: false, search: "" }, ranks: null, placementSlot: null, sacrifice: new Map(), sacrificeInventory: { entries: [], nextOffset: 0, totalStacks: 0, loading: false, search: "" }, sacrificeSubmitting: false, merge: null, lastResult: null,
   trades: [], selectedTrade: null, tradeStack: null, tradeQuantity: 1
 };
 const RARITIES = ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical", "Celestial", "Cosmic", "Transcendent", "Paradox"];
+const ROLL_PREVIEW_RARITIES = ["Common", "Rare", "Epic", "Legendary", "Cosmic", "Paradox"];
 
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
 function requestId() { return crypto.randomUUID(); }
@@ -43,7 +53,14 @@ function acceptGameState(payload) {
   if (!game?.player) return false;
   state.game = game; if (typeof payload.csrfToken === "string") state.csrfToken = payload.csrfToken;
   state.estimatedMoney = Number(game.player.money) || 0; state.lastMoneyTick = performance.now();
-  renderShell(); scheduleAutoRoll(); return true;
+  renderShell(); scheduleAutoRoll(); 
+  
+  if (state.activeView === "shop") {
+    renderShop();
+  }
+  
+  return true;
+
 }
 async function act(path, body, success, options = {}) {
   try {
@@ -89,15 +106,71 @@ function renderInventory() {
   dom.teamIncome.textContent = `+${N.coins(p.incomePerSecond)} / sec`;
   dom.teamGrid.innerHTML = p.placedAliens.map((entry, index) => entry ? `<div class="team-slot populated">${card(entry, `<button class="card-action" type="button" data-recall="${index}">RECALL</button>`, true)}</div>` : `<button class="team-slot empty" type="button" data-slot="${index}"><span>◈</span><b>EMPTY BOX</b><small>Deploy an alien</small></button>`).join("");
   dom.inventoryGrid.innerHTML = inv.entries.length ? inv.entries.map((entry) => card(entry, `<button class="card-action" type="button" data-deploy="${escapeHtml(entry.stackKey)}">DEPLOY</button>`)).join("") : `<div class="empty-state">No stored aliens yet. The dice are waiting.</div>`;
-  dom.inventoryMoreButton.hidden = inv.nextOffset === null;
+  dom.inventoryMoreButton.hidden = !inv.hasMore;
+  dom.inventoryMoreButton.disabled = inv.loading;
 }
 async function refreshInventory(reset = false) {
-  if (!player() || state.inventory.loading) return; const inv = state.inventory; inv.loading = true;
-  const offset = reset ? 0 : (inv.nextOffset ?? 0); const search = encodeURIComponent(inv.search);
-  try { const data = await api(`/api/inventory?offset=${offset}&limit=60&search=${search}`); inv.entries = reset ? data.entries : [...inv.entries, ...data.entries]; inv.nextOffset = data.nextOffset; inv.totalCopies = data.totalCopies; inv.totalStacks = data.totalStacks; if (state.activeView === "inventory") renderInventory(); }
-  catch (error) { if (error.status === 401) showLogin(); } finally { inv.loading = false; }
+  if (!player() || state.inventory.loading) return;
+
+  const inv = state.inventory;
+
+  // Never request another page after everything has been loaded.
+  if (!reset && !inv.hasMore) return;
+
+  if (reset) {
+    inv.entries = [];
+    inv.nextOffset = 0;
+    inv.hasMore = true;
+  }
+
+  inv.loading = true;
+
+  const offset = reset ? 0 : inv.nextOffset;
+  const search = encodeURIComponent(inv.search);
+
+  try {
+    const data = await api(
+      `/api/inventory?offset=${offset}&limit=60&search=${search}`
+    );
+
+    if (reset) {
+      inv.entries = data.entries || [];
+    } else {
+      inv.entries.push(...(data.entries || []));
+    }
+
+    inv.nextOffset = data.nextOffset ?? null;
+    inv.totalCopies = data.totalCopies ?? 0;
+    inv.totalStacks = data.totalStacks ?? 0;
+
+    inv.hasMore =
+      inv.nextOffset !== null &&
+      inv.nextOffset < inv.totalStacks;
+
+    inv.dirty = false;
+
+    // This is the important part.
+    // Once the server says there is no next offset, stop loading.
+
+    if (state.activeView === "inventory") {
+      renderInventory();
+    }
+  } catch (error) {
+    if (error.status === 401) showLogin();
+  } finally {
+    inv.loading = false;
+  }
 }
-function refreshInventoryIfNeeded() { if (!state.inventory.entries.length && !state.inventory.loading) refreshInventory(true); }
+
+function invalidateInventory() {
+  state.inventory.dirty = true;
+}
+
+function refreshInventoryIfNeeded() {
+  if (state.inventory.dirty && !state.inventory.loading) {
+    refreshInventory(true);
+  }
+}
 function renderShop() {
   const p = player(); if (!p) return;
   const labels = { luck: (upgrade) => `NOW ${N.luck(upgrade.current)} · NEXT ${N.luck(upgrade.next)}`, speed: (upgrade) => `NOW ${Math.round(upgrade.current * 100)}% faster · NEXT ${Math.round(upgrade.next * 100)}%`, coin: (upgrade) => `NOW x${N.number(upgrade.current)} income · NEXT x${N.number(upgrade.next)}` };
@@ -115,12 +188,19 @@ function renderRanks() {
 async function refreshCatalog(reset = false) { if (!player() || state.catalog.loading) return; const dataState = state.catalog; dataState.loading = true; try { const offset = reset ? 0 : (dataState.nextOffset ?? 0); const result = await api(`/api/catalog?offset=${offset}&limit=80&search=${encodeURIComponent(dataState.search)}`); dataState.entries = reset ? result.entries : [...dataState.entries, ...result.entries]; dataState.nextOffset = result.nextOffset; dataState.total = result.total; if (state.activeView === "ranks") renderRanks(); } catch (error) { if (error.status === 401) showLogin(); } finally { dataState.loading = false; } }
 function refreshCatalogIfNeeded() { if (!state.catalog.entries.length && !state.catalog.loading) refreshCatalog(true); }
 async function refreshRanks() { if (!player()) return; try { state.ranks = await api("/api/ranks"); if (state.activeView === "ranks") renderRanks(); } catch (error) { if (error.status === 401) showLogin(); } }
+async function primeRollCandidates() {
+  if (!player() || state.rollCandidates.loading || state.rollCandidates.entries.length) return;
+  state.rollCandidates.loading = true;
+  try {
+    const samples = await Promise.all(ROLL_PREVIEW_RARITIES.map((rarity) => api(`/api/catalog?offset=0&limit=1&rarity=${encodeURIComponent(rarity)}`)));
+    state.rollCandidates.entries = samples.flatMap((sample) => sample.entries || []);
+  } catch (error) { if (error.status === 401) showLogin(); }
+  finally { state.rollCandidates.loading = false; }
+}
 
 function renderResult(alien, rollCount = 1) {
   if (!alien) return; const previous = currentResultTitle(); state.lastResult = alien; dom.resultBox.classList.remove("is-scanning", "is-near-reveal"); dom.resultBox.classList.add("is-revealed"); dom.resultIcon.textContent = alien.emoji; dom.resultState.textContent = alien.rarity.toUpperCase(); dom.resultName.textContent = `${alien.name}${plusLabel(alien.plusLevel)}`; dom.resultInfo.textContent = `${N.chance(alien.baseChance)} · ${rollCount > 1 ? `${rollCount} dice resolved` : "Signal acquired"}`; dom.previousResult.textContent = previous; dom.nextResult.textContent = "LOCKED";
 }
-const SCAN_MESSAGES = ["Charging the probability lattice", "Signals crossing the roll core", "Reading a volatile frequency", "Stabilizing the unknown", "One outcome is taking shape"];
-function scanFrame(label, detail = "The outcome is still unknown…") { dom.resultBox.classList.add("is-scanning"); dom.resultBox.classList.remove("is-revealed"); dom.resultState.textContent = "SIGNAL SCAN"; dom.resultName.textContent = label; dom.resultInfo.textContent = detail; dom.nextResult.textContent = "UNRESOLVED"; }
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
 function rollTier(alien) { const log = Number(alien?.baseChanceLog) || 0; if (log >= 23) return 5; if (log >= 13.2) return 4; if (log >= 8) return 3; if (log >= 6.4) return 2; if (log >= 5.25) return 1; return 0; }
@@ -131,27 +211,56 @@ function makeRollParticles(count, color, payoff = false) {
   for (let index = 0; index < count; index += 1) { const particle = document.createElement("i"); const angle = (Math.PI * 2 * index) / count + Math.random() * .42; const distance = 80 + Math.random() * 175; particle.className = `roll-particle${payoff ? " payoff" : ""}`; particle.style.setProperty("--x", `${Math.cos(angle) * distance}px`); particle.style.setProperty("--y", `${Math.sin(angle) * distance}px`); particle.style.setProperty("--delay", `${Math.random() * .18}s`); particle.style.setProperty("--size", `${3 + Math.random() * 6}px`); fragment.append(particle); }
   dom.rollFx.append(fragment);
 }
+function nextRollCandidate(presentation, excludedIds = []) {
+  const excluded = new Set(excludedIds); const entries = state.rollCandidates.entries.filter((entry) => !excluded.has(entry.id));
+  if (!entries.length) return null;
+  const candidate = entries[presentation.candidateCursor % entries.length]; presentation.candidateCursor += 1; return candidate;
+}
+function previewFrame(presentation, options = {}) {
+  const current = nextRollCandidate(presentation, options.excludedIds); const upcoming = nextRollCandidate(presentation, [...(options.excludedIds || []), current?.id]);
+  dom.resultBox.classList.add("is-scanning"); dom.resultBox.classList.remove("is-revealed"); restartClass(dom.resultBox, "is-previewing");
+  dom.previousResult.textContent = presentation.previousName;
+  if (!current) {
+    const rarity = RARITIES[presentation.fallbackCursor % RARITIES.length]; const nextRarity = RARITIES[(presentation.fallbackCursor + 1) % RARITIES.length]; presentation.fallbackCursor += 1;
+    dom.resultIcon.textContent = "?"; dom.resultState.textContent = "POSSIBLE RARITY · NOT LOCKED"; dom.resultName.textContent = `${rarity} signal`; dom.resultInfo.textContent = "A real catalog tier — not awarded"; dom.nextResult.textContent = `${nextRarity.toUpperCase()} SIGNAL`; return;
+  }
+  dom.resultIcon.textContent = current.emoji; dom.resultState.textContent = options.locking ? "POSSIBLE SIGNAL · NOT LOCKED" : "POSSIBLE SIGNAL"; dom.resultName.textContent = `${current.name}${plusLabel(current.plusLevel)}`;
+  dom.resultInfo.textContent = `${N.chance(current.baseChance)} · Prospect only — not awarded`; dom.nextResult.textContent = upcoming ? `${upcoming.emoji} ${upcoming.name}` : "UNKNOWN";
+}
+function rollBeatDurations(tier, animationMs) {
+  const beats = 4 + tier; const target = Math.max(500, Math.min(1360, Math.round(animationMs * (.27 + tier * .065))));
+  const weights = Array.from({ length: beats }, (_, index) => 1 + index * 1.05); const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  return weights.map((weight) => Math.max(68, Math.round(target * weight / totalWeight)));
+}
+function restoreResultBox() {
+  if (state.lastResult) { renderResult(state.lastResult); return; }
+  dom.resultBox.classList.remove("is-scanning", "is-revealed"); dom.resultIcon.textContent = "🎲"; dom.resultState.textContent = "READY"; dom.resultName.textContent = "Awaiting signal"; dom.resultInfo.textContent = "The reveal lands here."; dom.previousResult.textContent = "—"; dom.nextResult.textContent = "???";
+}
 function beginRollPresentation() {
-  const presentation = { scanner: null, generation: ++state.rollFxGeneration }; const duration = Math.max(900, Number(player()?.rollAnimationMs) || 900);
-  document.body.classList.add("is-rolling"); dom.rollingMain.classList.remove("is-payoff", "is-near-reveal", "is-result-known"); dom.rollingMain.classList.add("is-rolling", "is-searching"); dom.resultBox.classList.remove("is-revealed", "is-payoff", "is-near-reveal"); dom.resultBox.classList.add("roll-energy"); dom.resultBox.style.setProperty("--roll-color", "var(--mint)"); dom.dice.style.setProperty("--roll-duration", `${duration}ms`); dom.dice.classList.add("is-rolling"); makeRollParticles(13, "var(--mint)"); scanFrame(SCAN_MESSAGES[0], "Dice committed · server is drawing the result"); playSound("rollStart");
-  let frame = 1; presentation.scanner = window.setInterval(() => { scanFrame(SCAN_MESSAGES[frame % SCAN_MESSAGES.length]); if (frame % 2 === 0) playSound("rollTick"); frame += 1; }, 170); return presentation;
+  const presentation = { scanner: null, generation: ++state.rollFxGeneration, previousName: currentResultTitle(), candidateCursor: Math.floor(Math.random() * Math.max(1, state.rollCandidates.entries.length)), fallbackCursor: Math.floor(Math.random() * RARITIES.length) }; const duration = Math.max(680, Math.min(1100, Math.round((Number(player()?.rollAnimationMs) || 1200) * .55)));
+  document.body.classList.add("is-rolling"); dom.rollingMain.classList.remove("is-payoff", "is-near-reveal", "is-result-known"); dom.rollingMain.classList.add("is-rolling", "is-searching"); dom.resultBox.classList.remove("is-revealed", "is-payoff", "is-near-reveal"); dom.resultBox.classList.add("roll-energy"); dom.resultBox.style.setProperty("--roll-color", "var(--mint)"); dom.dice.style.setProperty("--roll-duration", `${duration}ms`); dom.dice.classList.add("is-rolling"); makeRollParticles(13, "var(--mint)"); previewFrame(presentation); playSound("rollStart");
+  let frame = 1; presentation.scanner = window.setInterval(() => { previewFrame(presentation); if (frame % 2 === 0) playSound("rollTick"); frame += 1; }, 105); return presentation;
 }
 function finishRollPresentation(presentation, payoff = false) {
   if (presentation?.scanner) window.clearInterval(presentation.scanner); dom.dice.classList.remove("is-rolling"); dom.dice.style.removeProperty("--roll-duration"); dom.resultBox.classList.remove("roll-energy", "is-near-reveal");
-  const clear = () => { if (presentation && presentation.generation !== state.rollFxGeneration) return; document.body.classList.remove("is-rolling"); dom.rollingMain.classList.remove("is-rolling", "is-searching", "is-result-known", "is-near-reveal", "is-payoff"); dom.resultBox.classList.remove("is-payoff"); dom.rollFx.replaceChildren(); };
-  if (payoff && !reducedMotion()) window.setTimeout(clear, 820); else clear();
+  const clear = () => { if (presentation && presentation.generation !== state.rollFxGeneration) return; document.body.classList.remove("is-rolling"); dom.rollingMain.classList.remove("is-rolling", "is-searching", "is-result-known", "is-near-reveal", "is-payoff"); dom.rollingMain.removeAttribute("data-roll-tier"); dom.rollingMain.style.removeProperty("--roll-color"); dom.resultBox.classList.remove("is-payoff", "is-previewing"); dom.resultBox.style.removeProperty("--roll-color"); dom.rollFx.replaceChildren(); };
+  if (payoff && !reducedMotion()) window.setTimeout(clear, 820); else { clear(); restoreResultBox(); }
 }
 async function animateRoll(result, presentation) {
   const p = player(); const full = p.settings.rollingAnimation && !reducedMotion(); const tier = rollTier(result.featured); const color = result.featured.color || "var(--mint)";
   if (presentation?.scanner) window.clearInterval(presentation.scanner); dom.resultBox.style.setProperty("--roll-color", color); dom.rollingMain.style.setProperty("--roll-color", color); dom.rollingMain.dataset.rollTier = String(tier); dom.rollingMain.classList.add("is-result-known"); makeRollParticles(14 + tier * 5, color);
   if (!full) { renderResult(result.featured, result.results.length); flashRoll(tier >= 3 ? "rare" : "pulse"); makeRollParticles(14 + tier * 5, color, true); playSound("rollReveal"); if (tier >= 3) playSound("rareReveal"); finishRollPresentation(presentation, true); return; }
-  const beats = 3 + tier; const crescendoMs = Math.max(720, Math.min(1450, Math.round(p.rollAnimationMs * (.37 + tier * .06))));
-  for (let beat = 0; beat < beats; beat += 1) { const nearReveal = beat === beats - 1; if (nearReveal) { dom.rollingMain.classList.add("is-near-reveal"); dom.resultBox.classList.add("is-near-reveal"); flashRoll(tier >= 3 ? "rare" : "pulse"); } else if (beat > 0 && tier >= 2) flashRoll("pulse"); scanFrame(nearReveal ? "SIGNAL LOCKED — REVEALING" : SCAN_MESSAGES[(beat + 1) % SCAN_MESSAGES.length], nearReveal ? "Do not blink." : `${Math.round(((beat + 1) / beats) * 100)}% probability lock`); playSound("rollTick"); await delay(Math.max(95, Math.round(crescendoMs / beats))); }
+  const beatDurations = rollBeatDurations(tier, p.rollAnimationMs); const excludedIds = result.results.map((entry) => entry.id);
+  for (let beat = 0; beat < beatDurations.length; beat += 1) { const nearReveal = beat >= beatDurations.length - 2; if (nearReveal) { dom.rollingMain.classList.add("is-near-reveal"); dom.resultBox.classList.add("is-near-reveal"); flashRoll(tier >= 3 ? "rare" : "pulse"); } else if (beat > 0 && tier >= 2) flashRoll("pulse"); previewFrame(presentation, { excludedIds, locking: nearReveal }); playSound("rollTick"); await delay(beatDurations[beat]); }
   dom.resultBox.classList.remove("is-scanning"); dom.resultBox.classList.add("is-payoff"); dom.rollingMain.classList.add("is-payoff"); flashRoll(tier >= 3 ? "rare" : "reveal"); makeRollParticles(20 + tier * 7, color, true); renderResult(result.featured, result.results.length); playSound("rollReveal"); if (tier >= 3) playSound("rareReveal"); finishRollPresentation(presentation, true);
 }
 async function rollDice() {
-  if (state.rolling || !player()) return; state.rolling = true; renderShell(); const presentation = beginRollPresentation();
-  try { const result = await api("/api/roll", { method: "POST", body: JSON.stringify({ mutationId: requestId() }) }); if (!result.ok) { finishRollPresentation(presentation); acceptGameState(result); showToast(result.error, "error"); return; } await animateRoll(result, presentation); acceptGameState(result); state.inventory.entries = []; if (state.activeView === "inventory") refreshInventory(true); if (result.discovery) showDiscovery(result.discovery); else showToast(`${result.featured.name} joined your inventory.`); }
+  if (state.rolling || !player()) return; primeRollCandidates(); state.rolling = true; renderShell(); const presentation = beginRollPresentation();
+  try { const result = await api("/api/roll", { method: "POST", body: JSON.stringify({ mutationId: requestId() }) }); if (!result.ok) { finishRollPresentation(presentation); acceptGameState(result); showToast(result.error, "error"); return; } await animateRoll(result, presentation); acceptGameState(result); state.inventory.nextOffset = 0;
+
+if (state.activeView === "inventory") {
+  refreshInventory(true);
+} if (result.discovery) showDiscovery(result.discovery); else showToast(`${result.featured.name} joined your inventory.`); }
   catch (error) { finishRollPresentation(presentation); if (error.payload?.state) acceptGameState(error.payload); if (error.status === 401) showLogin(); else { playSound("error"); showToast(error.message, "error"); } }
   finally { state.rolling = false; renderShell(); scheduleAutoRoll(); }
 }
@@ -163,7 +272,7 @@ function deployStack(key) { const entry = state.inventory.entries.find((item) =>
 function openPlacement(slot) { state.placementSlot = slot; dom.placementChoices.innerHTML = state.inventory.entries.map((entry) => card(entry, `<button class="card-action" type="button" data-place="${escapeHtml(entry.stackKey)}">DEPLOY</button>`)).join(""); openModal(dom.placementModal); }
 function stackFromKey(key) { const [alienId, plus] = String(key).split("|"); return { alienId, plusLevel: Number(plus) }; }
 function sacrificeQuantity(key) { return state.sacrifice.get(key)?.quantity || 0; }
-function setSacrificeQuantity(entry, value) { const quantity = Math.max(0, Math.min(Number(entry.count) || 0, Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0)); if (quantity && !state.sacrifice.has(entry.stackKey) && state.sacrifice.size >= 60) { showToast("A sacrifice can contain up to 60 different stacks.", "error"); return; } if (quantity) state.sacrifice.set(entry.stackKey, { quantity, luck: Number(entry.sacrificeLuck) || 0 }); else state.sacrifice.delete(entry.stackKey); }
+function setSacrificeQuantity(entry, value) { const quantity = Math.max(0, Math.min(Number(entry.count) || 0, Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0)); if (quantity && !state.sacrifice.has(entry.stackKey) && state.sacrifice.size >= 5) { showToast("A sacrifice can contain up to 5 different stacks.", "error"); return; } if (quantity) state.sacrifice.set(entry.stackKey, { quantity, luck: Number(entry.sacrificeLuck) || 0 }); else state.sacrifice.delete(entry.stackKey); }
 async function refreshSacrificeInventory(reset = false) {
   const source = state.sacrificeInventory; if (!player() || (!reset && (source.loading || source.nextOffset === null))) return; if (reset) { source.entries = []; source.nextOffset = 0; source.totalStacks = 0; source.generation = (source.generation || 0) + 1; }
   const generation = source.generation || 0; const offset = reset ? 0 : source.nextOffset; source.loading = true; renderSacrifice();
@@ -179,7 +288,8 @@ function renderSacrifice() {
   dom.sacrificeChoices.innerHTML = entries.length ? entries.map((entry) => { const quantity = sacrificeQuantity(entry.stackKey); return `<article class="selection-card ${quantity ? "selected" : ""}" style="--alien-color:${escapeHtml(entry.color)}"><span>${escapeHtml(entry.emoji)}</span><div><b>${escapeHtml(entry.name)}${plusLabel(entry.plusLevel)}</b><small>${escapeHtml(entry.rarity).toUpperCase()} · ${N.chance(entry.baseChance)}</small><em>Owned: ${N.number(entry.count)} · Selected: ${N.number(quantity)} · ${N.luck(entry.sacrificeLuck)} each</em></div><div class="quantity-stepper"><button type="button" data-sac-minus="${escapeHtml(entry.stackKey)}" ${quantity ? "" : "disabled"} aria-label="Remove one ${escapeHtml(entry.name)}">−</button><input type="number" inputmode="numeric" min="0" max="${Number(entry.count)}" value="${quantity}" data-sac-quantity="${escapeHtml(entry.stackKey)}" aria-label="Sacrifice quantity for ${escapeHtml(entry.name)}"><button type="button" data-sac-plus="${escapeHtml(entry.stackKey)}" ${quantity >= entry.count ? "disabled" : ""} aria-label="Add one ${escapeHtml(entry.name)}">+</button></div></article>`; }).join("") : `<div class="empty-state">${source.loading ? "Scanning your stored aliens…" : "Roll an alien before making this decision."}</div>`;
   dom.sacrificeMoreButton.hidden = source.loading || source.nextOffset === null; dom.confirmSacrifice.disabled = !count || state.sacrificeSubmitting;
 }
-async function confirmSacrifice() { if (state.sacrificeSubmitting || !state.sacrifice.size) return; state.sacrificeSubmitting = true; renderSacrifice(); const items = [...state.sacrifice.entries()].map(([key, selection]) => ({ ...stackFromKey(key), quantity: selection.quantity })); try { const result = await act("/api/sacrifice", { items }, "Temporary Luck charged for your next roll.", { sound: "purchase" }); if (result) { closeModal(dom.sacrificeModal); state.sacrifice.clear(); state.inventory.entries = []; refreshInventory(true); } } finally { state.sacrificeSubmitting = false; renderSacrifice(); } }
+async function confirmSacrifice() { if (state.sacrificeSubmitting || !state.sacrifice.size) return; state.sacrificeSubmitting = true; renderSacrifice(); const items = [...state.sacrifice.entries()].map(([key, selection]) => ({ ...stackFromKey(key), quantity: selection.quantity })); try { const result = await act("/api/sacrifice", { items }, "Temporary Luck charged for your next roll.", { sound: "purchase" }); if (result) { closeModal(dom.sacrificeModal); state.sacrifice.clear(); invalidateInventory();
+refreshInventory(true); } } finally { state.sacrificeSubmitting = false; renderSacrifice(); } }
 function openMerge() { state.merge = null; renderMerge(); openModal(dom.mergeModal); }
 function renderMerge() { const choices = state.inventory.entries.filter((entry) => entry.count >= 3 && entry.plusLevel < 3); const selected = state.merge; dom.mergePreview.innerHTML = selected ? `<span>${escapeHtml(selected.emoji)} ${escapeHtml(selected.name)}${plusLabel(selected.plusLevel)} ×3</span><b>→ ${escapeHtml(selected.emoji)} ${escapeHtml(selected.name)}${plusLabel(selected.plusLevel + 1)}</b><small>Consumes 3; creates one permanent +${selected.plusLevel + 1} stack.</small>` : "Choose an eligible stack below."; dom.mergeChoices.innerHTML = choices.length ? choices.map((entry) => `<button class="merge-choice ${selected?.stackKey === entry.stackKey ? "selected" : ""}" type="button" data-merge-choice="${escapeHtml(entry.stackKey)}"><span>${escapeHtml(entry.emoji)}</span><b>${escapeHtml(entry.name)}${plusLabel(entry.plusLevel)}</b><small>${N.number(entry.count)} copies · ${N.chance(entry.baseChance)}</small></button>`).join("") : `<div class="empty-state">No matching stacks of three yet.</div>`; dom.confirmMerge.disabled = !selected; }
 
@@ -187,7 +297,7 @@ function renderTrades() { const selected = state.trades.find((room) => room.id =
 async function refreshTrades() { if (!player()) return; try { const data = await api("/api/trade-rooms"); state.trades = data.rooms || []; if (state.activeView === "trading") renderTrades(); } catch (error) { if (error.status === 401) showLogin(); } }
 
 function showLogin() { clearTimeout(state.autoTimer); state.game = null; state.csrfToken = ""; state.rolling = false; dom.app.setAttribute("aria-hidden", "true"); openModal(dom.loginModal); }
-function showGame() { closeModal(dom.loginModal); dom.app.setAttribute("aria-hidden", "false"); setView("rolling"); }
+function showGame() { closeModal(dom.loginModal); dom.app.setAttribute("aria-hidden", "false"); setView("rolling"); primeRollCandidates(); }
 function pulseAlienBox() {
   if (state.activeView !== "inventory" || !player()?.incomePerSecond) return;
   const boxes = [...document.querySelectorAll(".team-slot.populated")];
@@ -207,10 +317,16 @@ dom.animationSetting.addEventListener("click", () => act("/api/settings", { sett
 dom.discoverySetting.addEventListener("click", () => act("/api/settings", { settings: { fullDiscovery: !player().settings.fullDiscovery } }, "Discovery setting saved.", { sound: "menu" }));
 document.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", () => { if (button.dataset.closeModal === "sacrificeModal") state.sacrifice.clear(); closeModal($("#" + button.dataset.closeModal)); }));
 dom.closeDiscovery.addEventListener("click", () => { dom.discoveryMini.hidden = true; dom.discoveryModal.classList.remove("is-open"); }); dom.minimizeDiscovery.addEventListener("click", minimizeDiscovery); dom.discoveryMini.addEventListener("click", () => { dom.discoveryMini.hidden = true; dom.discoveryModal.classList.add("is-open"); });
-dom.inventorySearch.addEventListener("input", () => { state.inventory.search = dom.inventorySearch.value.trim(); state.inventory.entries = []; state.inventory.nextOffset = 0; refreshInventory(true); }); dom.inventoryMoreButton.addEventListener("click", () => refreshInventory());
+dom.inventorySearch.addEventListener("input", () => {
+  state.inventory.search = dom.inventorySearch.value.trim();
+  state.inventory.entries = [];
+  state.inventory.nextOffset = 0;
+  state.inventory.hasMore = true;
+  refreshInventory(true);
+}); dom.inventoryMoreButton.addEventListener("click", () => refreshInventory());
 dom.inventoryGrid.addEventListener("click", (event) => { const button = event.target.closest("[data-deploy]"); if (button) deployStack(button.dataset.deploy); }); dom.teamGrid.addEventListener("click", (event) => { const recall = event.target.closest("[data-recall]"); const slot = event.target.closest("[data-slot]"); if (recall) act("/api/remove-alien", { slotIndex: Number(recall.dataset.recall) }, "Alien returned to storage.").then((result) => { if (result) refreshInventory(true); }); if (slot) openPlacement(Number(slot.dataset.slot)); });
 dom.placementChoices.addEventListener("click", (event) => { const button = event.target.closest("[data-place]"); if (!button) return; const item = stackFromKey(button.dataset.place); act("/api/place-alien", { ...item, slotIndex: state.placementSlot }, "Alien deployed to your active team.").then((result) => { if (result) { closeModal(dom.placementModal); refreshInventory(true); } }); });
-dom.mergeButton.addEventListener("click", openMerge); dom.mergeChoices.addEventListener("click", (event) => { const button = event.target.closest("[data-merge-choice]"); if (!button) return; state.merge = state.inventory.entries.find((entry) => entry.stackKey === button.dataset.mergeChoice) || null; renderMerge(); playSound("menu"); }); dom.confirmMerge.addEventListener("click", () => { if (!state.merge) return; act("/api/merge", { alienId: state.merge.id, plusLevel: state.merge.plusLevel }, "Shiny alien forged.", { sound: "merge" }).then((result) => { if (result) { state.merge = null; refreshInventory(true); renderMerge(); } }); });
+dom.mergeButton.addEventListener("click", openMerge); dom.mergeChoices.addEventListener("click", (event) => { const button = event.target.closest("[data-merge-choice]"); if (!button) return; state.merge = state.inventory.entries.find((entry) => entry.stackKey === button.dataset.mergeChoice) || null; renderMerge(); playSound("menu"); }); dom.confirmMerge.addEventListener("click", () => { if (!state.merge) return; act("/api/merge", { alienId: state.merge.id, plusLevel: state.merge.plusLevel }, "Shiny alien forged.", { sound: "merge" }).then((result) => { if (result) { state.merge = null; invalidateInventory(); refreshInventory(true); renderMerge(); } }); });
 dom.equipBestButton.addEventListener("click", () => { dom.teamGrid.classList.add("is-replacing"); act("/api/equip-best", {}, null, { sound: "equip" }).then((result) => { setTimeout(() => dom.teamGrid.classList.remove("is-replacing"), 520); if (result) { showToast(result.changed ? "Best team equipped." : "Your team is already optimal."); refreshInventory(true); } }); });
 dom.openSacrifice.addEventListener("click", openSacrifice); dom.sacrificeSearch.addEventListener("input", () => { state.sacrificeInventory.search = dom.sacrificeSearch.value.trim(); refreshSacrificeInventory(true); }); dom.sacrificeMoreButton.addEventListener("click", () => refreshSacrificeInventory()); dom.sacrificeChoices.addEventListener("click", (event) => { const plus = event.target.closest("[data-sac-plus]"); const minus = event.target.closest("[data-sac-minus]"); const key = plus?.dataset.sacPlus || minus?.dataset.sacMinus; if (!key) return; const entry = state.sacrificeInventory.entries.find((item) => item.stackKey === key); if (!entry) return; setSacrificeQuantity(entry, sacrificeQuantity(key) + (plus ? 1 : -1)); renderSacrifice(); playSound("menu"); }); dom.sacrificeChoices.addEventListener("change", (event) => { const input = event.target.closest("[data-sac-quantity]"); if (!input) return; const entry = state.sacrificeInventory.entries.find((item) => item.stackKey === input.dataset.sacQuantity); if (!entry) return; setSacrificeQuantity(entry, input.value); renderSacrifice(); }); dom.cancelSacrifice.addEventListener("click", () => { state.sacrifice.clear(); closeModal(dom.sacrificeModal); }); dom.confirmSacrifice.addEventListener("click", confirmSacrifice);
 dom.shopGrid.addEventListener("click", (event) => { const upgrade = event.target.closest("[data-upgrade]"); if (upgrade) act("/api/buy-upgrade", { upgrade: upgrade.dataset.upgrade }, "Research upgraded.").then((result) => { if (result) renderShop(); }); if (event.target.closest("#buyDice")) act("/api/buy-dice", {}, "A new die joined the array.", { sound: "rareReveal" }).then((result) => { if (result) renderShop(); }); });
@@ -229,5 +345,5 @@ async function restoreSession() {
 }
 window.setInterval(() => { if (!player()) return; const elapsed = (performance.now() - state.lastMoneyTick) / 1000; dom.moneyDisplay.textContent = N.coins(state.estimatedMoney + elapsed * (Number(player().incomePerSecond) || 0)); }, 250);
 window.setInterval(syncGame, 25_000);
-window.setInterval(pulseAlienBox, 3600);
+window.setInterval(pulseAlienBox, 1200);
 restoreSession();
