@@ -13,6 +13,9 @@
 const MAX_DICE = 12;
 const AUTO_ROLL_INCOME_MULTIPLIER = 0.8;
 const BASE_ROLL_ANIMATION_MS = 1950;
+const BASE_ROLL_COOLDOWN_MS = 720;
+const MIN_ROLL_COOLDOWN_MS = 600;
+const SACRIFICE_LUCK_EFFECT_MULTIPLIER = 100;
 
 const RARITIES = Object.freeze([
   { maxLog: 4.35, name: "Common", color: "hsl(205 16% 72%)" },
@@ -61,6 +64,13 @@ function rollAnimationDuration(speedLevel) {
   return Math.max(650, Math.round(BASE_ROLL_ANIMATION_MS * (1 - speedReduction(speedLevel))));
 }
 
+// Gameplay recovery is intentionally separate from visual reveal duration.
+// The lower bound stays below the roll rate limit, leaving headroom for normal
+// player requests without turning the limiter into the timing mechanism.
+function rollCooldownDuration(speedLevel) {
+  return Math.max(MIN_ROLL_COOLDOWN_MS, Math.round(BASE_ROLL_COOLDOWN_MS * (1 - speedReduction(speedLevel))));
+}
+
 function diceCost(currentDice) {
   if (!Number.isSafeInteger(currentDice) || currentDice < 1 || currentDice >= MAX_DICE) return Infinity;
   // Each die is intentionally a major economy sink. It rises much faster than
@@ -75,7 +85,7 @@ function luckExponent(luck) {
   // grows logarithmically so extreme Luck does not destroy rarity.
   const rarityPressure = Math.log10(safeLuck);
 
-  return 1 / (1 + rarityPressure / 8);
+  return 1 / (1 + rarityPressure / 10);
 }
 
 function rarityForLog(baseChanceLog) {
@@ -85,7 +95,7 @@ function rarityForLog(baseChanceLog) {
 function sacrificeLuck(alien, plusLevel = 0) {
   const log = Math.max(1, Number(alien?.baseChanceLog) || 1);
   const shinyMultiplier = 1 + Math.max(0, Math.min(3, plusLevel)) * 0.8;
-  return roundGame(Math.max(0.2, 0.032 * (log ** 3)) * shinyMultiplier);
+  return roundGame(Math.max(0.2, 0.032 * (log ** 3)) * shinyMultiplier * SACRIFICE_LUCK_EFFECT_MULTIPLIER);
 }
 
 function alienPower(alien, plusLevel = 0) {
@@ -107,7 +117,7 @@ function upgradeSnapshot(key, level) {
 }
 
 module.exports = Object.freeze({
-  AUTO_ROLL_INCOME_MULTIPLIER, BASE_ROLL_ANIMATION_MS, MAX_DICE, RARITIES, UPGRADE_DEFINITIONS,
+  AUTO_ROLL_INCOME_MULTIPLIER, BASE_ROLL_ANIMATION_MS, BASE_ROLL_COOLDOWN_MS, MIN_ROLL_COOLDOWN_MS, MAX_DICE, RARITIES, SACRIFICE_LUCK_EFFECT_MULTIPLIER, UPGRADE_DEFINITIONS,
   alienPower, coinMultiplier, diceCost, incomeFor, luckExponent, luckMultiplier, rarityForLog,
-  rollAnimationDuration, roundGame, sacrificeLuck, speedReduction, upgradeCost, upgradeSnapshot
+  rollAnimationDuration, rollCooldownDuration, roundGame, sacrificeLuck, speedReduction, upgradeCost, upgradeSnapshot
 });
