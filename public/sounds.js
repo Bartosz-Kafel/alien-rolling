@@ -2,17 +2,41 @@
 
 // One replaceable procedural sound bus. Replace a recipe here with an audio
 // asset later without touching gameplay, UI, or animation code.
+//
+// Mobile browsers only allow an AudioContext to start inside a user gesture;
+// the first playSound() call may come from an async handler (e.g. a session
+// restore), so the context is (re)created on every call and explicitly
+// resumed the first time the document records a real interaction.
 (() => {
-  let context; let master;
+  let context;
+  let master;
+  let unlocked = false;
+
   function start() {
-    if (!context) {
-      context = new (window.AudioContext || window.webkitAudioContext)();
-      const compressor = context.createDynamicsCompressor(); master = context.createGain();
-      compressor.threshold.value = -20; compressor.knee.value = 18; compressor.ratio.value = 9; master.gain.value = 0.15;
-      master.connect(compressor).connect(context.destination);
-    }
-    if (context.state === "suspended") context.resume();
+    try {
+      if (!context) {
+        context = new (window.AudioContext || window.webkitAudioContext)();
+        const compressor = context.createDynamicsCompressor();
+        master = context.createGain();
+        compressor.threshold.value = -20; compressor.knee.value = 18; compressor.ratio.value = 9; master.gain.value = 0.15;
+        master.connect(compressor).connect(context.destination);
+      }
+      if (context.state === "suspended" && unlocked) context.resume();
+    } catch { /* Audio unavailable; the game stays silent rather than breaking. */ }
   }
+
+  function unlock() {
+    unlocked = true;
+    if (context && context.state === "suspended") context.resume();
+    document.removeEventListener("pointerdown", unlock);
+    document.removeEventListener("keydown", unlock);
+    document.removeEventListener("touchend", unlock);
+  }
+
+  document.addEventListener("pointerdown", unlock, { passive: true });
+  document.addEventListener("keydown", unlock, { passive: true });
+  document.addEventListener("touchend", unlock, { passive: true });
+
   function tone(frequency, duration, { end, delay = 0, type = "triangle", volume = 0.1 } = {}) {
     try { start(); const at = context.currentTime + delay; const oscillator = context.createOscillator(); const gain = context.createGain(); oscillator.type = type; oscillator.frequency.setValueAtTime(frequency, at); if (end) oscillator.frequency.exponentialRampToValueAtTime(Math.max(30, end), at + duration); gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(volume, at + 0.015); gain.gain.exponentialRampToValueAtTime(0.0001, at + duration); oscillator.connect(gain).connect(master); oscillator.start(at); oscillator.stop(at + duration + .03); } catch { /* Audio needs a browser gesture. */ }
   }
