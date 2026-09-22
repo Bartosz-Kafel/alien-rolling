@@ -12,10 +12,19 @@
  */
 const MAX_DICE = 12;
 const AUTO_ROLL_INCOME_MULTIPLIER = 0.8;
-const BASE_ROLL_ANIMATION_MS = 1950;
+const BASE_ROLL_ANIMATION_MS = 2000;
+const MIN_ROLL_ANIMATION_MS = 500;
 const BASE_ROLL_COOLDOWN_MS = 720;
 const MIN_ROLL_COOLDOWN_MS = 600;
 const SACRIFICE_LUCK_EFFECT_MULTIPLIER = 1250;
+/* Temporary (pending) Luck converts into a guaranteed rarity floor for the
+ * next roll instead of merely nudging weights. Sacrificed mass raises the
+ * floor logarithmically: log10(1 + pending) - 2.5. A single common alien
+ * (pending ~250) stays below 1/10, so small sacrifices change nothing, while
+ * roughly 1,000 commons (pending ~250k) guarantee something at least as rare
+ * as 1/790. The cap stays far below endgame rarities. */
+const MAX_PENDING_RARITY_LOG = 20;
+const PENDING_FLOOR_OFFSET = 2.5;
 
 const RARITIES = Object.freeze([
   { maxLog: 4.35, name: "Common", color: "hsl(205 16% 72%)" },
@@ -60,8 +69,19 @@ function speedReduction(level) {
   return 0.56 * (1 - Math.exp(-Math.max(0, level) / 12));
 }
 
+/* Roll Drive: the reveal runs 2.0s at level 0 and decays exponentially
+ * toward the 0.5s floor, effectively reaching it around level 100. */
 function rollAnimationDuration(speedLevel) {
-  return Math.max(650, Math.round(BASE_ROLL_ANIMATION_MS * (1 - speedReduction(speedLevel))));
+  const eased = Math.exp(-Math.max(0, speedLevel) / 20);
+  return Math.max(MIN_ROLL_ANIMATION_MS, Math.round(MIN_ROLL_ANIMATION_MS + (BASE_ROLL_ANIMATION_MS - MIN_ROLL_ANIMATION_MS) * eased));
+}
+
+/* Guaranteed minimum rarity (baseChanceLog) for the next roll, driven only by
+ * pending Luck. Returns 0 when there is no guarantee. */
+function pendingLuckFloor(pendingLuck) {
+  const safe = Math.max(0, Number(pendingLuck) || 0);
+  if (safe <= 0) return 0;
+  return Math.min(MAX_PENDING_RARITY_LOG, roundGame(Math.log10(1 + safe) - PENDING_FLOOR_OFFSET));
 }
 
 // Gameplay recovery is intentionally separate from visual reveal duration.
@@ -117,7 +137,7 @@ function upgradeSnapshot(key, level) {
 }
 
 module.exports = Object.freeze({
-  AUTO_ROLL_INCOME_MULTIPLIER, BASE_ROLL_ANIMATION_MS, BASE_ROLL_COOLDOWN_MS, MIN_ROLL_COOLDOWN_MS, MAX_DICE, RARITIES, SACRIFICE_LUCK_EFFECT_MULTIPLIER, UPGRADE_DEFINITIONS,
-  alienPower, coinMultiplier, diceCost, incomeFor, luckExponent, luckMultiplier, rarityForLog,
+  AUTO_ROLL_INCOME_MULTIPLIER, BASE_ROLL_ANIMATION_MS, BASE_ROLL_COOLDOWN_MS, MAX_PENDING_RARITY_LOG, MIN_ROLL_ANIMATION_MS, MIN_ROLL_COOLDOWN_MS, MAX_DICE, RARITIES, SACRIFICE_LUCK_EFFECT_MULTIPLIER, UPGRADE_DEFINITIONS,
+  alienPower, coinMultiplier, diceCost, incomeFor, luckExponent, luckMultiplier, pendingLuckFloor, rarityForLog,
   rollAnimationDuration, rollCooldownDuration, roundGame, sacrificeLuck, speedReduction, upgradeCost, upgradeSnapshot
 });

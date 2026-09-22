@@ -8,11 +8,13 @@ An incremental Alien collection game with server-authoritative rolls, inventory,
 2. Run [`migrations/20260912_alien_dice_rework.sql`](migrations/20260912_alien_dice_rework.sql) once in Supabase.
 3. Run `npm start`.
 
-`npm test` validates permanent IDs, the 10,000-entry catalog, endgame rarity, stack identity, ranking, and economy curves. `npm run simulate:economy` prints deterministic early-to-endgame balance snapshots. `npm run generate:aliens` is append-safe for catalog maintenance; use `--force` only before an initial unreleased catalog is deployed.
+Roll Drive level 0 rolls with a 2.0s reveal that eases exponentially to its 0.5s floor, effectively reached at level 100.
+
+`npm test` validates permanent IDs, the 2,500-entry catalog, endgame rarity, stack identity, ranking, and economy curves. `npm run simulate:economy` prints deterministic early-to-endgame balance snapshots. `npm run generate:aliens` is append-safe for catalog maintenance; use `--force` only before an initial unreleased catalog is deployed.
 
 ## Architecture
 
-- [`data/alien-registry.json`](data/alien-registry.json) is checked-in, immutable content. It contains 10,000 actual alien definitions.
+- [`data/alien-registry.json`](data/alien-registry.json) is checked-in, immutable content. It contains 2,500 actual alien definitions.
 - [`scripts/generate-aliens.js`](scripts/generate-aliens.js) generates new permanent definitions from compact naming/content pools without changing existing IDs or names.
 - [`balance.js`](balance.js) owns all server-side tuning: upgrade curves, Dice Quantity, income, Shiny value, power ranking, and Luck probability transforms.
 - [`server.js`](server.js) validates every state change, serializes mutations, and persists each account update transactionally. Session records are persistent and a login invalidates previous sessions for that account.
@@ -30,6 +32,10 @@ This makes scarcer entries increasingly reachable without making all rarities li
 `permanent Luck × (1 + pending sacrifice Luck)`
 
 Pending Luck is written atomically with the selected inventory consumption, then cleared only after a successful server roll.
+
+### Temporary Luck guarantee
+
+Pending Luck also converts into a server-authoritative **rarity floor** for the next roll's dice: `log10(1 + pending) − 2.5`, capped at log 20. A small sacrifice stays inert (below a 1/10 guarantee), while a large sacrifice — roughly 1,000 common aliens — guarantees a result better than 1/700. When a draw lands below the floor it is resampled once, then filled from the mildest decade band above the floor so the promise never collapses onto one identical alien. The weight transform above is untouched.
 
 ## Manual sound placement
 

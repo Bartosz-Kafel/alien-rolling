@@ -11,6 +11,7 @@
     "generate:aliens": "node scripts/generate-aliens.js 10000"
   },
   "dependencies": {
+    "compression": "^1.8.2",
     "express": "^4.19.2",
     "pg": "^8.23.0",
     "serverless-http": "^3.2.0"

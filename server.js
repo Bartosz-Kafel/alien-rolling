@@ -7,12 +7,18 @@
  */
 const crypto = require("crypto");
 const express = require("express");
+const compression = require("compression");
 const path = require("path");
 const { Pool } = require("pg");
 const { ALIENS, ALIEN_BY_ID, CATALOG_SIZE, REGISTRY_VERSION } = require("./aliens");
 const balance = require("./balance");
 
 const app = express();
+
+// The hosting platform terminates connections in front of this process. Trust
+// one proxy hop so the per-IP login rate limit sees real client addresses
+// instead of every player sharing the proxy's bucket.
+app.set("trust proxy", 1);
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false });
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const SESSION_COOKIE = "afk_session";
@@ -841,11 +847,31 @@ function gameStateFor(userId) {
       pendingLuck: player.pendingLuck,
       currentLuck: effectiveLuck(player),
       permanentLuck: permanentLuck(player),
+      pendingRarityFloor: balance.pendingLuckFloor(player.pendingLuck),
       settings: player.settings,
       upgrades,
       diceCost: balance.diceCost(player.diceCount),
       stats: statsFor(player)
     }
+  };
+}
+
+/* Compact player delta for the high-frequency endpoints (auto-roll, trade
+ * polling). It carries only the fields a roll or an income tick can change;
+ * the client merges it into its existing player object. This keeps the
+ * ~1.1s auto-roll cycle to a few hundred bytes instead of a full snapshot. */
+function compactPlayerState(userId) {
+  const player = state.users[userId];
+  const now = Date.now();
+
+  return {
+    money: player.money,
+    incomePerSecond: totalIncome(player, now),
+    autoRollActive: activeAutoRoll(player, now),
+    nextRollAt: player.lastRollAt + balance.rollCooldownDuration(player.upgrades.speed),
+    inventoryVersion: player.mutationVersion,
+    pendingLuck: player.pendingLuck,
+    currentLuck: effectiveLuck(player)
   };
 }
 
@@ -1000,6 +1026,15 @@ function pickAlien(luck) {
   return ALIENS[low];
 }
 
+/* Aliens are ordered most common -> rarest. The guarantee fires by choosing
+ * uniformly among the mildest decade-band at or above the floor, so a large
+ * sacrifice promises the rarity without repeating the identical alien. */
+function randomAlienAtOrAbove(rarityFloor) {
+  const band = ALIENS.filter((alien) => alien.baseChanceLog >= rarityFloor && alien.baseChanceLog < rarityFloor + 1);
+  const candidates = band.length ? band : ALIENS.filter((alien) => alien.baseChanceLog >= rarityFloor);
+  return candidates[crypto.randomInt(candidates.length)] || ALIENS[ALIENS.length - 1];
+}
+
 function compareStacks(left, right) {
   const incomeDiff = (Number(right.income) || 0) - (Number(left.income) || 0);
   if (incomeDiff !== 0) {
@@ -1027,14 +1062,26 @@ app.use(express.json({
   strict: true
 }));
 
+// Compress every compressible response (JSON payloads and static assets).
+// This is the single largest bandwidth saving: JSON shrinks 5-10x and
+// CSS/JavaScript roughly 4x, with no change for clients.
+app.use(compression());
+
 app.use((request, response, next) => {
   response.set({
-    "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'"
   });
+  next();
+});
+
+// API responses are per-player and mutable, so they must never be cached.
+// Static assets keep the maxAge already configured on express.static below,
+// which the previous blanket no-store header was silently defeating.
+app.use("/api", (request, response, next) => {
+  response.set("Cache-Control", "no-store");
   next();
 });
 
@@ -1212,18 +1259,33 @@ app.post("/api/roll", requireSession, requireSameOrigin, requireJson, requireCsr
         return {
           ok: false,
           error: "Roll drive is still stabilizing.",
-          state: gameStateFor(request.userId)
+          playerPatch: compactPlayerState(request.userId)
         };
       }
 
       const luckCap = effectiveLuck(player);
       const luck = rollLuck(luckCap);
 
+      /* Pending Luck guarantees a minimum rarity for this roll's best die.
+       * The weights stay untouched: scarcer entries below the floor are only
+       * reached through the normal transform when the floor is lower. */
+      const rarityFloor = balance.pendingLuckFloor(player.pendingLuck);
+
       const results = [];
       const discoveries = [];
 
       for (let die = 0; die < player.diceCount; die += 1) {
-        const alien = pickAlien(luck);
+        let alien = pickAlien(luck);
+
+        /* One free resample when the draw lands below the guarantee. Two
+         * samples at Luck x1 give the floor's entry ~0.6% weight, so the
+         * guarantee materially dominates without reshaping the base game. */
+        if (alien.baseChanceLog < rarityFloor) {
+          alien = pickAlien(luck);
+          if (alien.baseChanceLog < rarityFloor) {
+            alien = randomAlienAtOrAbove(rarityFloor);
+          }
+        }
 
         if (!addStack(player, alien.id, 0)) {
           throw new Error("Inventory stack reached its safe maximum.");
@@ -1262,7 +1324,7 @@ app.post("/api/roll", requireSession, requireSameOrigin, requireJson, requireCsr
         discovery,
         newDiscoveries: discoveries,
         usedLuck: luck,
-        state: gameStateFor(request.userId)
+        playerPatch: compactPlayerState(request.userId)
       };
     });
 
@@ -1739,7 +1801,7 @@ app.get("/api/trade-rooms", requireSession, (request, response) => {
   const payload = rooms.map((room) => roomPublic(room, request.userId));
   response.json({
     rooms: payload,
-    state: gameStateFor(request.userId)
+    playerPatch: compactPlayerState(request.userId)
   });
 });
 
@@ -2145,4 +2207,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { app, ALIENS, balance, compareStacks, pickAlien, stackKey };
+module.exports = { app, ALIENS, balance, compareStacks, pickAlien, randomAlienAtOrAbove, stackKey };
