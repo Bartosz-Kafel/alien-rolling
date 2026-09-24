@@ -29,6 +29,6 @@ if (ALIEN_BY_ID.size !== ALIENS.length) throw new Error("Alien registry has dupl
 module.exports = Object.freeze({
   ALIENS,
   ALIEN_BY_ID,
-  REGISTRY_VERSION: "2026.09.12.2",
+  REGISTRY_VERSION: "2026.09.24.1",
   CATALOG_SIZE: ALIENS.length
 });

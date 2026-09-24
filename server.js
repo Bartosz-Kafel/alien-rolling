@@ -19,7 +19,12 @@ const app = express();
 // one proxy hop so the per-IP login rate limit sees real client addresses
 // instead of every player sharing the proxy's bucket.
 app.set("trust proxy", 1);
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: false }
+    : /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || "") ? false : { rejectUnauthorized: false }
+});
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const SESSION_COOKIE = "afk_session";
 const SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
@@ -29,7 +34,7 @@ const MAX_MONEY = 1e96;
 const TEAM_SLOT_COUNT = 3;
 const RATE_LIMITS = { login: [20, 60_000], roll: [120, 60_000], buy: [120, 60_000], inventory: [60, 60_000], trade: [40, 60_000] };
 
-const state = { users: {}, sessions: new Map(), tradeRooms: new Map(), queue: [], busy: false, requests: new Map(), distributionCache: new Map() };
+const state = { users: {}, sessions: new Map(), tradeRooms: new Map(), queue: [], busy: false, requests: new Map(), distributionCache: new Map(), dirtyPlayers: new Set(), dirtyOrder: [], pendingTradeDeletes: [], persisting: false };
 
 function number(value, fallback = 0) {
   const n = Number(value);
@@ -275,26 +280,86 @@ async function persistPlayers(ids, deleteTradeRoomId = null) {
     return;
   }
 
-  const client = await pool.connect();
+  /* Persistence runs OUTSIDE the mutation queue: requests no longer wait on a
+   * network round-trip to PostgreSQL, which previously serialized every roll
+   * behind the slowest write across all players. Players are flushed by a
+   * rolling background window instead, so 5 concurrent rollers contend on
+   * CPU only. */
+  for (const id of unique) {
+    if (!state.dirtyPlayers.has(id)) {
+      state.dirtyPlayers.add(id);
+      state.dirtyOrder.push(id);
+    }
+  }
+
+  if (deleteTradeRoomId) {
+    state.pendingTradeDeletes.push(deleteTradeRoomId);
+  }
+
+  schedulePersistenceFlush();
+}
+
+const PERSIST_BATCH = 8;
+const PERSIST_FLUSH_MS = 2_000;
+let persistTimer = null;
+
+async function flushPersistedPlayers() {
+  persistTimer = null;
+  if (state.persisting || (!state.dirtyOrder.length && !state.pendingTradeDeletes.length)) return;
+  state.persisting = true;
+
+  /* Work on local copies so a failure can re-queue exactly what did not
+   * commit — no player is ever dropped from the save set on a DB error. */
+  const order = state.dirtyOrder;
+  state.dirtyOrder = [];
+  const deletes = state.pendingTradeDeletes.splice(0, state.pendingTradeDeletes.length);
 
   try {
-    await client.query("BEGIN");
-
-    for (const id of unique) {
-      await writePlayer(client, id, state.users[id]);
+    while (order.length) {
+      const batch = order.splice(0, PERSIST_BATCH);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        for (const id of batch) {
+          await writePlayer(client, id, state.users[id]);
+        }
+        while (deletes.length) {
+          await client.query("DELETE FROM trade_rooms WHERE id = $1", [deletes.shift()]);
+        }
+        await client.query("COMMIT");
+        for (const id of batch) {
+          state.dirtyPlayers.delete(id);
+        }
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        console.error("Player persistence failed:", error.message);
+        // Re-queue this batch plus everything that never got attempted.
+        state.dirtyOrder.push(...batch, ...order.splice(0, order.length));
+        state.pendingTradeDeletes.push(...deletes.splice(0, deletes.length));
+        break;
+      } finally {
+        client.release();
+      }
     }
-
-    if (deleteTradeRoomId) {
-      await client.query("DELETE FROM trade_rooms WHERE id = $1", [deleteTradeRoomId]);
-    }
-
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
   } finally {
-    client.release();
+    state.persisting = false;
   }
+
+  // Keep draining while work remains (e.g. a failed batch retrying); an idle
+  // server pays one cheap no-op sweep at most.
+  if (state.dirtyOrder.length || state.pendingTradeDeletes.length) {
+    schedulePersistenceFlush();
+  }
+}
+
+function schedulePersistenceFlush() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    flushPersistedPlayers().catch((error) => {
+      console.error("Persistence flush crashed:", error);
+    });
+  }, PERSIST_FLUSH_MS);
+  persistTimer.unref?.();
 }
 
 async function persistTradeRoom(room) {
@@ -864,6 +929,9 @@ function compactPlayerState(userId) {
   const player = state.users[userId];
   const now = Date.now();
 
+  /* These are exactly the fields a roll, income tick, or toggle can move.
+   * The 60s game-state sync sends only this patch when nothing structural
+   * changed, so an idle player costs ~200 bytes per minute. */
   return {
     money: player.money,
     incomePerSecond: totalIncome(player, now),
@@ -873,6 +941,10 @@ function compactPlayerState(userId) {
     pendingLuck: player.pendingLuck,
     currentLuck: effectiveLuck(player)
   };
+}
+
+function compactStateFor(userId) {
+  return { playerPatch: compactPlayerState(userId) };
 }
 
 function recordMutation(player, id, payload) {
@@ -1162,9 +1234,13 @@ app.post("/api/login", requireSameOrigin, requireJson, async (request, response,
 app.get("/api/game-state", requireSession, async (request, response, next) => {
   try {
     const payload = await withLock(async () => {
-      applyIncome(state.users[request.userId]);
-      await persistPlayers([request.userId]);
-      return gameStateFor(request.userId);
+      const player = state.users[request.userId];
+      applyIncome(player);
+      /* Queue a save instead of blocking the read on a write: idle income
+       * still reaches the database within the flush window, but the request
+       * itself no longer waits on PostgreSQL. */
+      persistPlayers([request.userId]);
+      return request.query.compact === "1" ? compactStateFor(request.userId) : gameStateFor(request.userId);
     });
 
     response.json({
@@ -2189,9 +2265,56 @@ setInterval(() => {
   for (const [id, room] of state.tradeRooms) {
     if (room.expiresAt < now || room.status === "completed") {
       state.tradeRooms.delete(id);
+      // The in-memory sweeper used to leave expired rows in the table until
+      // the next boot; queue the DELETE for the persistence flush instead.
+      state.pendingTradeDeletes.push(id);
     }
   }
+
+  // Durability sweep: re-queue players whose persistence batch failed, so a
+  // transient database hiccup cannot strand a player unsaved.
+  if (state.dirtyPlayers.size) {
+    for (const id of state.dirtyPlayers) {
+      if (!state.dirtyOrder.includes(id)) {
+        state.dirtyOrder.push(id);
+      }
+    }
+    schedulePersistenceFlush();
+  }
 }, 60_000).unref();
+
+let shuttingDown = false;
+async function shutdownFlush() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    const ids = new Set([...state.dirtyPlayers, ...state.dirtyOrder].filter((id) => state.users[id]));
+    if (ids.size || state.pendingTradeDeletes.length) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        for (const id of ids) {
+          await writePlayer(client, id, state.users[id]);
+        }
+        for (const id of state.pendingTradeDeletes.splice(0, state.pendingTradeDeletes.length)) {
+          await client.query("DELETE FROM trade_rooms WHERE id = $1", [id]);
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+      } finally {
+        client.release();
+      }
+    }
+  } catch { /* Best effort: the platform is taking the process anyway. */ }
+  process.exit(0);
+}
+process.on("SIGTERM", shutdownFlush);
+process.on("SIGINT", shutdownFlush);
 
 if (require.main === module) {
   initializeDatabase()

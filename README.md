@@ -35,7 +35,7 @@ Pending Luck is written atomically with the selected inventory consumption, then
 
 ### Temporary Luck guarantee
 
-Pending Luck also converts into a server-authoritative **rarity floor** for the next roll's dice: `log10(1 + pending) − 2.5`, capped at log 20. A small sacrifice stays inert (below a 1/10 guarantee), while a large sacrifice — roughly 1,000 common aliens — guarantees a result better than 1/700. When a draw lands below the floor it is resampled once, then filled from the mildest decade band above the floor so the promise never collapses onto one identical alien. The weight transform above is untouched.
+Pending Luck also converts into a server-authoritative **rarity floor** for the next roll's dice: `log10(1 + pending) − 1.5`, capped at log 20, and it only becomes active once it can bind above the catalog's mildest rarity (about 60 common aliens). Roughly 100 commons guarantee ~1/790, and roughly 1,000 commons guarantee ~1/7,900. When a draw lands below the floor it is resampled once, then filled from the mildest decade band above the floor so the promise never collapses onto one identical alien. The weight transform above is untouched.
 
 ## Manual sound placement
 

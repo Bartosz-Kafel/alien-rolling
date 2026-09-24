@@ -12,6 +12,22 @@
   let master;
   let unlocked = false;
 
+  /* A running (but silent) AudioContext exempts the tab from background timer
+   * throttling, so auto-roll keeps ticking while the player is on another
+   * tab. Gain is exactly 0: nothing audible, nothing re-mixed. */
+  function startKeepalive() {
+    try {
+      if (context.__keepalive) return;
+      context.__keepalive = true;
+      const oscillator = context.createOscillator();
+      const gate = context.createGain();
+      gate.gain.value = 0;
+      oscillator.frequency.value = 60;
+      oscillator.connect(gate).connect(master);
+      oscillator.start();
+    } catch { /* Keepalive is best-effort only. */ }
+  }
+
   function start() {
     try {
       if (!context) {
@@ -22,16 +38,27 @@
         master.connect(compressor).connect(context.destination);
       }
       if (context.state === "suspended" && unlocked) context.resume();
+      if (context.state === "running") startKeepalive();
     } catch { /* Audio unavailable; the game stays silent rather than breaking. */ }
   }
 
   function unlock() {
     unlocked = true;
-    if (context && context.state === "suspended") context.resume();
+    if (context && context.state === "suspended") {
+      context.resume().then(() => startKeepalive()).catch(() => {});
+    } else {
+      startKeepalive();
+    }
     document.removeEventListener("pointerdown", unlock);
     document.removeEventListener("keydown", unlock);
     document.removeEventListener("touchend", unlock);
   }
+
+  // Returning to the tab re-arms audio (mobile policies suspend contexts at
+  // will); the game's visibilitychange handler re-schedules rolls itself.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && unlocked) start();
+  });
 
   document.addEventListener("pointerdown", unlock, { passive: true });
   document.addEventListener("keydown", unlock, { passive: true });

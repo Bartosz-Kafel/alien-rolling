@@ -127,9 +127,9 @@ const A = results[0], B = results[1], C = results[2], C2 = results[3], D = resul
 if (B.floor > 0.01) { score -= 2; add("major", "G1 violated: one common already produces a floor."); }
 else console.log("+ G1 ok: a single common sacrifice yields no guarantee.");
 
-const target = Math.log10(700);
-if (C.meanBestLog < target) { score -= 2; add("major", `G2 weak: 1,000 commons average best-die log ${C.meanBestLog.toFixed(2)} < log10(700)=${target.toFixed(2)}.`); }
-else console.log("+ G2 ok: 1,000 commons average better than 1/700.");
+const target = Math.log10(7000);
+if (C.meanBestLog < target) { score -= 2; add("major", `G2 weak: 1,000 commons average best-die log ${C.meanBestLog.toFixed(2)} < log10(7000)=${target.toFixed(2)}.`); }
+else console.log("+ G2 ok: 1,000 commons average better than 1/7,000 (10x the old 1/700 bar).");
 
 if (C2.keepRate < 0.999) { score -= 2.5; add("critical", `G5 violated: with the promise active, ${(100 - C2.keepRate * 100).toFixed(1)}% of 3-dice rolls landed BELOW the promised floor (single-die: ${(100 - C.keepRate * 100).toFixed(1)}%). A guarantee this leaky is not a guarantee.`); }
 else console.log("+ G5 ok: the floor held on every roll.");

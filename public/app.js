@@ -550,7 +550,7 @@ function deliverPendingAnnouncement() {
 }
 
 async function animateRoll(result, presentation) {
-  const p = player(); const full = p.settings.rollingAnimation && !reducedMotion(); const tier = rollTier(result.featured); const color = result.featured.color || "var(--mint)";
+  const p = player(); const full = p.settings.rollingAnimation && !reducedMotion() && document.visibilityState === "visible"; const tier = rollTier(result.featured); const color = result.featured.color || "var(--mint)";
   if (presentation?.generation !== state.rollFxGeneration) return;
   if (presentation?.scanner) window.clearInterval(presentation.scanner); dom.resultBox.style.setProperty("--roll-color", color); dom.rollingMain.style.setProperty("--roll-color", color); dom.rollingMain.dataset.rollTier = String(tier); dom.rollingMain.classList.add("is-result-known"); makeRollParticles(14 + tier * 5, color);
   if (!full) { renderResult(result.featured, result.results.length); flashRoll(tier >= 3 ? "rare" : "pulse"); makeRollParticles(14 + tier * 5, color, true); playSound("rollReveal"); if (tier >= 3) playSound("rareReveal"); finishRollPresentation(presentation, true); deliverPendingAnnouncement(); return; }
@@ -591,8 +591,12 @@ function scheduleAutoRoll() {
   // jitter cannot turn a valid next roll into a cooldown 429.
   const targetAt = Math.max(Number(p.nextRollAt) || 0, state.rollRetryAt || 0);
   const delayMs = Math.max(0, targetAt - Date.now()) + 350;
+  // Deliberately NOT gated on document.visibilityState: a hidden tab keeps
+  // rolling (the silent audio keepalive in sounds.js exempts us from
+  // background timer throttling), and the reveal animation simply runs in
+  // its instant form until the tab is visible again.
   state.autoTimer = setTimeout(() => {
-    if (player()?.autoRollActive && document.visibilityState === "visible") {
+    if (player()?.autoRollActive) {
       rollDice();
     }
   }, delayMs);
@@ -641,8 +645,10 @@ function renderSacrifice() {
   const p = player();
   const nextPending = (Number(p.pendingLuck) || 0) + gain;
   const floor = Number(p.pendingRarityFloor) || 0;
-  // Mirrors balance.pendingLuckFloor: log10(1 + pending) - 2.5, capped at log 20.
-  const nextFloor = Math.min(20, Math.log10(1 + Math.max(0, nextPending)) - 2.5);
+  // Mirrors balance.pendingLuckFloor: log10(1 + pending) - 1.5, capped at
+  // log 20, and inert until it can bind above the catalog's mildest rarity.
+  const nextFloorRaw = Math.min(20, Math.log10(1 + Math.max(0, nextPending)) - 1.5);
+  const nextFloor = nextFloorRaw >= 2.7 ? nextFloorRaw : 0;
   dom.sacrificeCount.textContent = N.number(count); dom.sacrificeGain.textContent = N.luck(gain); dom.sacrificeNext.textContent = N.luck(p.permanentLuck * (1 + nextPending));
   dom.sacrificeStatus.textContent = source.loading ? "Loading owned aliens…" : entries.length ? `${N.number(entries.length)} of ${N.number(source.totalStacks)} stacks loaded` : source.search ? "No owned aliens match that search." : "No stored aliens available.";
   dom.sacrificeGuarantee.textContent = nextFloor > 0.01 ? `Guarantee: at least 1 / ${N.exactInteger(10 ** Math.min(nextFloor, 15))} on your next roll` : "No rarity guaranteed yet — sacrifice more to lock in a floor";
@@ -790,8 +796,8 @@ dom.shopGrid.addEventListener("click", (event) => {
 dom.catalogSearch.addEventListener("input", debounce(() => { state.catalog.search = dom.catalogSearch.value.trim(); state.catalog.entries = []; state.catalog.nextOffset = 0; refreshCatalog(true); }, 250)); dom.catalogMoreButton.addEventListener("click", () => refreshCatalog()); dom.rankRows.addEventListener("click", (event) => { const button = event.target.closest("[data-profile]"); if (button) showToast("Public pilot profile opens in a future station update."); });
 dom.tradeInvite.addEventListener("click", () => act("/api/trade-rooms", { recipient: dom.tradeRecipient.value.trim() }, "Trade invitation sent.").then((result) => { if (result) { dom.tradeRecipient.value = ""; refreshTrades(); } })); dom.tradeRooms.addEventListener("click", (event) => { const open = event.target.closest("[data-open-trade]"); const accept = event.target.closest("[data-accept-trade]"); if (open) { state.selectedTrade = open.dataset.openTrade; renderTrades(); } if (accept) act(`/api/trade-rooms/${encodeURIComponent(accept.dataset.acceptTrade)}/accept`, {}, "Trade terminal linked.").then((result) => { if (result) { state.selectedTrade = accept.dataset.acceptTrade; state.tradeInventory.dirty = true; refreshTradeInventoryIfNeeded(); refreshTrades(); } }); }); dom.tradeSearch.addEventListener("input", () => { clearTimeout(state.tradeSearchTimer); state.tradeSearchTimer = setTimeout(() => { state.tradeInventory.search = dom.tradeSearch.value.trim(); state.tradeInventory.dirty = true; refreshTradeInventoryIfNeeded(); }, 180); }); dom.tradeMoreButton.addEventListener("click", () => refreshTradeInventory()); dom.tradeChoices.addEventListener("click", (event) => { const button = event.target.closest("[data-trade-stack]"); if (!button) return; state.tradeStack = state.tradeInventory.entries.find((entry) => entry.stackKey === button.dataset.tradeStack); state.tradeQuantity = 1; renderTrades(); }); dom.tradeMinus.addEventListener("click", () => { state.tradeQuantity = Math.max(1, state.tradeQuantity - 1); renderTrades(); }); dom.tradePlus.addEventListener("click", () => { state.tradeQuantity = Math.min(state.tradeStack?.count || 1, state.tradeQuantity + 1); renderTrades(); }); dom.tradeOffer.addEventListener("click", () => { const room = state.trades.find((item) => item.id === state.selectedTrade); if (!room || !state.tradeStack) return; act(`/api/trade-rooms/${encodeURIComponent(room.id)}/offer`, { alienId: state.tradeStack.id, plusLevel: state.tradeStack.plusLevel, quantity: state.tradeQuantity }, "Offer updated.").then((result) => { if (result) refreshTrades(); }); }); dom.tradeConfirm.addEventListener("click", () => { const room = state.trades.find((item) => item.id === state.selectedTrade); if (!room) return; act(`/api/trade-rooms/${encodeURIComponent(room.id)}/confirm`, {}, null, { sound: "equip" }).then((result) => { if (result) { showToast(result.settled ? "Trade settled securely." : "Confirmation locked; awaiting the other pilot."); refreshTrades(); } }); }); dom.tradeCancel.addEventListener("click", () => { const room = state.trades.find((item) => item.id === state.selectedTrade); if (!room) return; act(`/api/trade-rooms/${encodeURIComponent(room.id)}/cancel`, {}, "Trade cancelled.").then((result) => { if (result !== null) { state.selectedTrade = null; refreshTrades(); } }); });
 document.querySelectorAll(".nav-tab").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { syncGame(); scheduleAutoRoll(); scheduleTradeUpdates(); } else { clearTimeout(state.autoTimer); clearTimeout(state.tradeTimer); } });
-async function syncGame() { if (!player() || state.syncBusy || document.visibilityState !== "visible") return; state.syncBusy = true; try { acceptGameState(await api("/api/game-state")); } catch (error) { if (error.status === 401) showLogin(); } finally { state.syncBusy = false; } }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { syncGame(); scheduleAutoRoll(); scheduleTradeUpdates(); } else { clearTimeout(state.tradeTimer); } });
+async function syncGame() { if (!player() || state.syncBusy || document.visibilityState !== "visible") return; state.syncBusy = true; try { acceptGameState(await api("/api/game-state?compact=1")); } catch (error) { if (error.status === 401) showLogin(); } finally { state.syncBusy = false; } }
 async function restoreSession() {
   try {
     const payload = await api("/api/game-state");

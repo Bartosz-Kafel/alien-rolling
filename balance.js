@@ -19,12 +19,23 @@ const MIN_ROLL_COOLDOWN_MS = 600;
 const SACRIFICE_LUCK_EFFECT_MULTIPLIER = 1250;
 /* Temporary (pending) Luck converts into a guaranteed rarity floor for the
  * next roll instead of merely nudging weights. Sacrificed mass raises the
- * floor logarithmically: log10(1 + pending) - 2.5. A single common alien
- * (pending ~250) stays below 1/10, so small sacrifices change nothing, while
- * roughly 1,000 commons (pending ~250k) guarantee something at least as rare
- * as 1/790. The cap stays far below endgame rarities. */
+ * floor logarithmically: log10(1 + pending) - 1.5, but the floor only exists
+ * once it can actually bind (at or above the catalog's mildest rarity, log
+ * 2.7). A single common alien produces no guarantee at all, roughly 100
+ * commons guarantee ~1/790, and roughly 1,000 commons guarantee ~1/7,900.
+ * The cap stays far below endgame rarities. */
 const MAX_PENDING_RARITY_LOG = 20;
-const PENDING_FLOOR_OFFSET = 2.5;
+const PENDING_FLOOR_OFFSET = 1.5;
+const MIN_BINDING_RARITY_LOG = 2.7;
+
+function pendingLuckFloor(pendingLuck) {
+  const safe = Math.max(0, Number(pendingLuck) || 0);
+  if (safe <= 0) return 0;
+  const floor = Math.min(MAX_PENDING_RARITY_LOG, roundGame(Math.log10(1 + safe) - PENDING_FLOOR_OFFSET));
+  // A floor below the catalog's mildest entry can never change a roll, so it
+  // is not a guarantee and must not be displayed as one.
+  return floor >= MIN_BINDING_RARITY_LOG ? floor : 0;
+}
 
 const RARITIES = Object.freeze([
   { maxLog: 4.35, name: "Common", color: "hsl(205 16% 72%)" },
@@ -74,14 +85,6 @@ function speedReduction(level) {
 function rollAnimationDuration(speedLevel) {
   const eased = Math.exp(-Math.max(0, speedLevel) / 20);
   return Math.max(MIN_ROLL_ANIMATION_MS, Math.round(MIN_ROLL_ANIMATION_MS + (BASE_ROLL_ANIMATION_MS - MIN_ROLL_ANIMATION_MS) * eased));
-}
-
-/* Guaranteed minimum rarity (baseChanceLog) for the next roll, driven only by
- * pending Luck. Returns 0 when there is no guarantee. */
-function pendingLuckFloor(pendingLuck) {
-  const safe = Math.max(0, Number(pendingLuck) || 0);
-  if (safe <= 0) return 0;
-  return Math.min(MAX_PENDING_RARITY_LOG, roundGame(Math.log10(1 + safe) - PENDING_FLOOR_OFFSET));
 }
 
 // Gameplay recovery is intentionally separate from visual reveal duration.
